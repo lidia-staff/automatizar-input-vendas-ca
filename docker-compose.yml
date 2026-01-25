@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16
+    container_name: ca_sales_db
+    environment:
+      POSTGRES_DB: ca_sales
+      POSTGRES_USER: ca_user
+      POSTGRES_PASSWORD: ca_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ca_sales_pg:/var/lib/postgresql/data
+
+  api:
+    build: .
+    container_name: ca_sales_api
+    environment:
+      DATABASE_URL: postgresql+psycopg2://ca_user:ca_pass@db:5432/ca_sales
+      CA_CLIENT_ID: "5kvgm92q50g3fnlie5h32h4req"
+      CA_CLIENT_SECRET: "1ikfpvhf7and561bj5tsq0h9e385us8r0ovnmk4ov637g54jaegr"
+      CA_API_BASE_URL: "https://api-v2.contaazul.com"
+      CA_AUTH_URL: "https://auth.contaazul.com"
+      TEST_TOKEN: "eyJraWQiOiJUa1BRbWs0UlR3M3RuWlZXcDdEanBURFhcL2RTajNvMU5SckI0R3I3ZzFTMD0iLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJlODdkZWI3Zi1jZDZkLTRiZjQtOTY5MC1iZmU0ZTliNThiYWIiLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAuc2EtZWFzdC0xLmFtYXpvbmF3cy5jb21cL3NhLWVhc3QtMV9WcDgzSjExd0EiLCJ2ZXJzaW9uIjoyLCJjbGllbnRfaWQiOiI1a3ZnbTkycTUwZzNmbmxpZTVoMzJoNHJlcSIsIm9yaWdpbl9qdGkiOiJiMzEwNGJjOS00YWZiLTQwMDYtOGNlNi01NDg5ODcyMjNiYjIiLCJldmVudF9pZCI6IjFmODE5NWJhLWIwZDMtNDY1Ny05OGM5LTc4N2ZiZjA1NjkwZSIsInRva2VuX3VzZSI6ImFjY2VzcyIsInNjb3BlIjoiYXdzLmNvZ25pdG8uc2lnbmluLnVzZXIuYWRtaW4gb3BlbmlkIHByb2ZpbGUiLCJhdXRoX3RpbWUiOjE3NjkyMTAzNjYsImV4cCI6MTc2OTIxODI2MywiaWF0IjoxNzY5MjE0NjYzLCJqdGkiOiI1YTYyNjhhNS1kZDg1LTRlM2UtYTY1ZC0yNWZkNDNlMjM4NTMiLCJ1c2VybmFtZSI6ImJvZHllZmFjZWJwb2ZpbmFuY2Vpcm9zYW50b3NpZkBnbWFpbC5jb20ifQ.sPzw2MjQn6eN-dYNQa2WSdToxhez4FTfdGKVZN2UKF3B6iVacUtB-b8kLcFrUg_dxN-cJ_VkyDsb6WQ8Swa7TUpa9oPQKdTfkvbSpWjNiXZtB8zd_EdLzRHHxQyhF44hs-vxFUNAS4lEk4H7zPZPH8WwVRbnWJF8SL9nOZLydv3VZRl5sgB3QkuXLx9SQbFvsODLB0hzoxFP-C9yI3912W0mHnoUa8QOLZNnfnILxDRXFHOPlVSClUhJCl5CK2en6HxdflcTS4B1sFryQzkIWQUgv3wMTbP9Me48iGyMshacUADvXD9QF0wBLw_wYSFoXTk6GysP9UOUtfuCeiESNw"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  ca_sales_pg:
