@@ -1,24 +1,35 @@
-from app.services.contaazul_people import get_or_create_customer_id
 from app.services.ca_payload_builder import build_ca_payload
 
 
-def build_sale_payload_with_customer(sale, ca_access_token: str) -> dict:
+def build_ca_sale_payload(
+    id_cliente: str,
+    numero: str | int,
+    sale,
+    items: list,
+    id_conta_financeira: str | None = None,
+) -> dict:
     """
-    1) resolve o id_cliente no Conta Azul (busca ou cria)
-    2) monta o payload da venda SEMPRE EM_ANDAMENTO
-    3) injeta id_cliente no payload
+    Monta o payload final da venda para o Conta Azul:
+    - usa o builder padrão (build_ca_payload)
+    - injeta id_cliente e numero
+    - força id_conta_financeira se vier informado
     """
 
-    # no MVP você pode começar só com o nome
-    customer_id = get_or_create_customer_id(
-        ca_access_token,
-        nome=sale.customer_name,
-        email=getattr(sale, "customer_email", None),
-        documento=getattr(sale, "customer_document", None),
-        telefone=getattr(sale, "customer_phone", None),
-        observacao="Criado automaticamente pelo integrador (venda em revisão).",
-    )
+    # Garante que o builder enxergue os itens (ele lê sale.items)
+    try:
+        sale.items = items
+    except Exception:
+        pass
 
-    payload = build_ca_payload(sale)  # já vem com situacao="EM_ANDAMENTO"
-    payload["id_cliente"] = customer_id
+    payload = build_ca_payload(sale)
+
+    # Campos essenciais
+    payload["id_cliente"] = id_cliente
+    payload["numero"] = str(numero)
+
+    # Força conta financeira se informada pela Company
+    if id_conta_financeira:
+        payload.setdefault("condicao_pagamento", {})
+        payload["condicao_pagamento"]["id_conta_financeira"] = id_conta_financeira
+
     return payload
