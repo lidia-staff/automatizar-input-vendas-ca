@@ -1,12 +1,12 @@
 import os
 import secrets
-import urllib.parse
 import datetime as dt
-import requests
 
+import requests
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.orm import Session
+from urllib.parse import urlencode
 
 from app.db.session import SessionLocal
 from app.db.models import Company
@@ -25,13 +25,12 @@ def _env_or_fail(name: str) -> str:
 def contaazul_start(company_id: int):
     """
     Abre a tela de login/autorização do Conta Azul.
-    Estilo Pluga: você clica numa URL e já vai pro consent.
     """
     ca_client_id = _env_or_fail("CA_CLIENT_ID")
     redirect_uri = _env_or_fail("CA_REDIRECT_URI")
 
-    # scope default (pode ajustar via variável)
-    scope = "sales"
+    # ✅ Scope correto do Conta Azul (Cognito) — conforme documentação deles
+    scope = "openid profile aws.cognito.signin.user.admin"
 
     nonce = secrets.token_urlsafe(16)
     state = f"{company_id}:{nonce}"
@@ -44,15 +43,14 @@ def contaazul_start(company_id: int):
         "scope": scope,
     }
 
-    url = "https://auth.contaazul.com/login?" + urllib.parse.urlencode(params)
-    return RedirectResponse(url=url, status_code=302)
+    auth_url = "https://auth.contaazul.com/login?" + urlencode(params)
+    return RedirectResponse(url=auth_url, status_code=302)
 
 
 @router.get("/api/contaazul/callback")
 def contaazul_callback(code: str, state: str):
     """
     Troca o code por tokens e salva na Company.
-    O Conta Azul redireciona pra cá (redirect_uri).
     """
     ca_client_id = _env_or_fail("CA_CLIENT_ID")
     ca_client_secret = _env_or_fail("CA_CLIENT_SECRET")
@@ -102,7 +100,6 @@ def contaazul_callback(code: str, state: str):
     finally:
         db.close()
 
-    # Página simples de sucesso (pra não ficar "json perdido")
     html = f"""
     <html>
       <body style="font-family: Arial; padding: 24px;">
