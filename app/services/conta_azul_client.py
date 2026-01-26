@@ -1,5 +1,7 @@
 import os
 import datetime as dt
+from typing import Any, Dict, Optional
+
 import requests
 from sqlalchemy.orm import Session
 
@@ -9,15 +11,18 @@ from app.db.models import Company
 
 class ContaAzulClient:
     """
-    Cliente Conta Azul com:
-    - leitura de token do banco por company_id
-    - refresh automático via refresh_token quando expirado
+    Cliente Conta Azul (api-v2) por company_id, estilo Pluga:
+
+    - tokens armazenados no banco (Company)
+    - refresh automático quando:
+        a) expiração (token_expires_at) está próxima
+        b) qualquer request retorna 401 (refresh-on-401) -> retry 1x
+    - todas as chamadas passam por _request()
     """
 
     def __init__(self, company_id: int):
         self.company_id = company_id
 
-        # API base correta (v2)
         self.api_base = os.getenv("CA_API_BASE_URL", "https://api-v2.contaazul.com").rstrip("/")
         self.auth_url = os.getenv("CA_AUTH_URL", "https://auth.contaazul.com/oauth2/token")
 
@@ -28,11 +33,12 @@ class ContaAzulClient:
 
         self._load_company_tokens()
 
-        # se expirou (ou está pra expirar), renova
+        # refresh preventivo (2 min antes)
         if self._is_token_expired():
             self._refresh_token()
 
-    def _load_company_tokens(self):
+    # ---------------- Tokens ----------------
+    def _load_company_tokens(self) -> None:
         db: Session = SessionLocal()
         try:
             c = db.query(Company).filter(Company.id == self.company_id).first()
@@ -45,17 +51,16 @@ class ContaAzulClient:
 
             self.access_token = c.access_token
             self.refresh_token = c.refresh_token
-            self.token_expires_at = c.token_expires_at  # pode ser naive; tratamos na comparação
+            self.token_expires_at = c.token_expires_at
         finally:
             db.close()
 
     def _now_utc(self) -> dt.datetime:
         return dt.datetime.now(dt.timezone.utc)
 
-    def _as_aware_utc(self, value: dt.datetime | None) -> dt.datetime | None:
+    def _as_aware_utc(self, value: Optional[dt.datetime]) -> Optional[dt.datetime]:
         if value is None:
             return None
-        # se vier "naive", assume UTC (pra não quebrar comparação)
         if value.tzinfo is None:
             return value.replace(tzinfo=dt.timezone.utc)
         return value.astimezone(dt.timezone.utc)
@@ -64,17 +69,9 @@ class ContaAzulClient:
         exp = self._as_aware_utc(self.token_expires_at)
         if exp is None:
             return True
-        # renova 2 min antes de expirar
         return self._now_utc() >= (exp - dt.timedelta(minutes=2))
 
-    def _headers(self):
-        return {
-            "Authorization": f"Bearer {self.access_token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-
-    def _refresh_token(self):
+    def _refresh_token(self) -> None:
         r = requests.post(
             self.auth_url,
             auth=(self.client_id, self.client_secret),
@@ -82,7 +79,6 @@ class ContaAzulClient:
             data={"grant_type": "refresh_token", "refresh_token": self.refresh_token},
             timeout=30,
         )
-
         if r.status_code >= 400:
             raise RuntimeError(f"Falha ao refresh token: {r.status_code} - {r.text}")
 
@@ -92,7 +88,6 @@ class ContaAzulClient:
         expires_in = int(data.get("expires_in", 3600))
         new_expires_at = self._now_utc() + dt.timedelta(seconds=expires_in)
 
-        # salva no banco
         db: Session = SessionLocal()
         try:
             c = db.query(Company).filter(Company.id == self.company_id).first()
@@ -100,57 +95,93 @@ class ContaAzulClient:
                 raise RuntimeError("Company não encontrada para salvar refresh")
             c.access_token = new_access
             c.refresh_token = new_refresh
-            c.token_expires_at = new_expires_at  # timezone-aware UTC
+            c.token_expires_at = new_expires_at
             db.add(c)
             db.commit()
         finally:
             db.close()
 
-        # atualiza memória
         self.access_token = new_access
         self.refresh_token = new_refresh
         self.token_expires_at = new_expires_at
 
-    # ---------- ENDPOINTS CA ----------
-    def get_next_sale_number(self) -> int:
-        url = f"{self.api_base}/v1/venda/proximo-numero"
-        r = requests.get(url, headers={"Authorization": f"Bearer {self.access_token}", "Accept": "application/json"}, timeout=20)
+    # ---------------- HTTP Core ----------------
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        json_body: Optional[Dict[str, Any]] = None,
+        timeout: int = 30,
+        retry_on_401: bool = True,
+    ) -> Any:
+        url = f"{self.api_base}{path}"
+        r = requests.request(
+            method=method.upper(),
+            url=url,
+            headers=self._headers(),
+            params=params,
+            json=json_body,
+            timeout=timeout,
+        )
+
+        # Se token invalidou antes do esperado: refresh e tenta 1x
+        if r.status_code == 401 and retry_on_401:
+            self._refresh_token()
+            return self._request(
+                method,
+                path,
+                params=params,
+                json_body=json_body,
+                timeout=timeout,
+                retry_on_401=False,
+            )
+
         if r.status_code >= 400:
-            raise RuntimeError(f"ContaAzul Próximo Número error {r.status_code}: {r.text}")
-        # retorna número puro tipo "380"
+            raise RuntimeError(f"ContaAzul API error {r.status_code}: {r.text}")
+
+        # Algumas rotas podem devolver número puro (text/plain)
+        ct = (r.headers.get("content-type") or "").lower()
+        if "application/json" in ct:
+            return r.json()
+        return r.text
+
+    # ---------------- Endpoints CA ----------------
+    def get_next_sale_number(self) -> int:
+        raw = self._request("GET", "/v1/venda/proximo-numero", timeout=20)
         try:
-            return int(str(r.text).strip())
+            return int(str(raw).strip())
         except Exception:
-            raise RuntimeError("Resposta inesperada do próximo número")
+            raise RuntimeError(f"Resposta inesperada do próximo número: {raw}")
 
     def list_people(self, nome: str, tipo_perfil: str = "Cliente") -> dict:
-        url = f"{self.api_base}/v1/pessoas"
-        params = {"nome": nome, "tipo_perfil": tipo_perfil}
-        r = requests.get(url, headers=self._headers(), params=params, timeout=20)
-        if r.status_code >= 400:
-            raise RuntimeError(f"ContaAzul Pessoas error {r.status_code}: {r.text}")
-        return r.json()
+        return self._request(
+            "GET",
+            "/v1/pessoas",
+            params={"nome": nome, "tipo_perfil": tipo_perfil},
+            timeout=20,
+        )
 
     def create_person_cliente(self, nome: str) -> dict:
-        """
-        Cria pessoa mínima como Cliente.
-        Docs: POST /v1/pessoas exige nome + tipo_pessoa + perfis[].tipo_perfil
-        """
-        url = f"{self.api_base}/v1/pessoas"
         payload = {
             "nome": nome,
             "tipo_pessoa": "Física",
             "perfis": [{"tipo_perfil": "Cliente"}],
             "ativo": True,
         }
-        r = requests.post(url, headers=self._headers(), json=payload, timeout=30)
-        if r.status_code >= 400:
-            raise RuntimeError(f"ContaAzul Criar Pessoa error {r.status_code}: {r.text}")
-        return r.json()
+        return self._request("POST", "/v1/pessoas", json_body=payload, timeout=30)
+
+    def list_financial_accounts(self) -> dict:
+        # contas financeiras
+        return self._request("GET", "/v1/conta-financeira", timeout=20)
 
     def create_sale(self, payload: dict) -> dict:
-        url = f"{self.api_base}/v1/venda"
-        r = requests.post(url, headers=self._headers(), json=payload, timeout=60)
-        if r.status_code >= 400:
-            raise RuntimeError(f"ContaAzul Venda error {r.status_code}: {r.text}")
-        return r.json()
+        return self._request("POST", "/v1/venda", json_body=payload, timeout=60)
