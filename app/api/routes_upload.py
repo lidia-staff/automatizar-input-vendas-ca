@@ -10,7 +10,7 @@ from app.db.models import Company, UploadBatch
 from app.services.import_xlsx import read_base_sheet
 from app.services.sales_builder import create_sales_from_records
 
-router = APIRouter()
+router = APIRouter(tags=["uploads"])
 
 
 @router.post("/uploads")
@@ -31,7 +31,16 @@ def upload_sales(
             shutil.copyfileobj(file.file, tmp)
             temp_path = tmp.name
 
-        records = read_base_sheet(temp_path, sheet_name="Base")
+        # ✅ aqui é onde geralmente quebra quando a planilha mudou
+        try:
+            records = read_base_sheet(temp_path, sheet_name="Base")
+        except Exception as e:
+            # devolve erro LEGÍVEL pro cliente (nada de 500 genérico)
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid_spreadsheet: {str(e)}"
+            )
+
         if not records:
             raise HTTPException(status_code=400, detail="empty_sheet")
 
@@ -43,14 +52,15 @@ def upload_sales(
         db.commit()
         db.refresh(batch)
 
-        created, ready, awaiting, with_error, items_with_error = (
-            create_sales_from_records(
+        try:
+            created, ready, awaiting, with_error, items_with_error = create_sales_from_records(
                 db=db,
                 company_id=company_id,
                 batch_id=batch.id,
                 records=records,
             )
-        )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"build_sales_failed: {str(e)}")
 
         return {
             "batch_id": batch.id,
