@@ -3,13 +3,6 @@ from typing import Dict
 
 
 def _normalize_payment_method(raw: str) -> str:
-    """
-    Recebe strings da planilha tipo:
-    - "Pix"
-    - "Cartão de crédito via outros bancos"
-    - "Boleto via outros bancos"
-    e retorna o enum do Conta Azul.
-    """
     s = (raw or "").strip().upper()
 
     if "PIX" in s:
@@ -25,13 +18,11 @@ def _normalize_payment_method(raw: str) -> str:
     if "DINHEIRO" in s:
         return "DINHEIRO"
 
-    # fallback seguro (Conta Azul aceita OUTRO)
     return "OUTRO"
 
 
 def _parcelas_qtd(payment_terms: str) -> int:
     t = (payment_terms or "").strip().upper()
-    # exemplos: "À vista", "1x", "5x", "10x"
     if "À VISTA" in t or "A VISTA" in t:
         return 1
     digits = "".join([c for c in t if c.isdigit()])
@@ -46,10 +37,7 @@ def _parcelas_qtd(payment_terms: str) -> int:
 
 def _build_parcelas(total: float, due_date: date, parcelas: int = 1):
     valor_parcela = round(total / parcelas, 2)
-    return [
-        {"data_vencimento": str(due_date), "valor": valor_parcela}
-        for _ in range(parcelas)
-    ]
+    return [{"data_vencimento": str(due_date), "valor": valor_parcela} for _ in range(parcelas)]
 
 
 def _build_itens(sale) -> list:
@@ -66,21 +54,13 @@ def _build_itens(sale) -> list:
 
 
 def build_ca_payload(sale) -> Dict:
-    """
-    Constrói o payload de venda para o Conta Azul.
-    Observação: NÃO define id_conta_financeira aqui.
-    Isso é responsabilidade do ca_sale_builder (Company.ca_financial_account_id).
-    """
     tipo_pagamento = _normalize_payment_method(sale.payment_method)
     n_parcelas = _parcelas_qtd(sale.payment_terms or "")
 
     payload = {
         "situacao": "EM_ANDAMENTO",
         "data_venda": str(sale.sale_date),
-        "observacoes": (
-            "Venda importada automaticamente.\n"
-            "⚠️ Revisão manual obrigatória antes da aprovação."
-        ),
+        "observacoes": "Venda importada automaticamente.",
         "itens": _build_itens(sale),
         "condicao_pagamento": {
             "tipo_pagamento": tipo_pagamento,

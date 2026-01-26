@@ -19,6 +19,9 @@ class Company(Base):
     # ✅ UUID da conta financeira no Conta Azul (por empresa)
     ca_financial_account_id = Column(String, nullable=True)
 
+    # ✅ UUID do item/serviço padrão (fallback) no Conta Azul (por empresa)
+    default_item_id = Column(String, nullable=True)
+
     batches = relationship("UploadBatch", back_populates="company", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="company", cascade="all, delete-orphan")
 

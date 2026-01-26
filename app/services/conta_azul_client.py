@@ -1,7 +1,5 @@
 import os
 import datetime as dt
-from typing import Any, Dict, Optional
-
 import requests
 from sqlalchemy.orm import Session
 
@@ -11,13 +9,10 @@ from app.db.models import Company
 
 class ContaAzulClient:
     """
-    Cliente Conta Azul (api-v2) por company_id, estilo Pluga:
-
-    - tokens armazenados no banco (Company)
-    - refresh automático quando:
-        a) expiração (token_expires_at) está próxima
-        b) qualquer request retorna 401 (refresh-on-401) -> retry 1x
-    - todas as chamadas passam por _request()
+    Cliente Conta Azul com:
+    - leitura de token do banco por company_id
+    - refresh automático via refresh_token quando expirado
+    - retry 1x em 401 (estilo Pluga)
     """
 
     def __init__(self, company_id: int):
@@ -33,12 +28,10 @@ class ContaAzulClient:
 
         self._load_company_tokens()
 
-        # refresh preventivo (2 min antes)
         if self._is_token_expired():
             self._refresh_token()
 
-    # ---------------- Tokens ----------------
-    def _load_company_tokens(self) -> None:
+    def _load_company_tokens(self):
         db: Session = SessionLocal()
         try:
             c = db.query(Company).filter(Company.id == self.company_id).first()
@@ -58,7 +51,7 @@ class ContaAzulClient:
     def _now_utc(self) -> dt.datetime:
         return dt.datetime.now(dt.timezone.utc)
 
-    def _as_aware_utc(self, value: Optional[dt.datetime]) -> Optional[dt.datetime]:
+    def _as_aware_utc(self, value: dt.datetime | None) -> dt.datetime | None:
         if value is None:
             return None
         if value.tzinfo is None:
@@ -71,7 +64,14 @@ class ContaAzulClient:
             return True
         return self._now_utc() >= (exp - dt.timedelta(minutes=2))
 
-    def _refresh_token(self) -> None:
+    def _headers(self):
+        return {
+            "Authorization": f"Bearer {self.access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+    def _refresh_token(self):
         r = requests.post(
             self.auth_url,
             auth=(self.client_id, self.client_secret),
@@ -105,70 +105,56 @@ class ContaAzulClient:
         self.refresh_token = new_refresh
         self.token_expires_at = new_expires_at
 
-    # ---------------- HTTP Core ----------------
-    def _headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.access_token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-
-    def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: Optional[Dict[str, Any]] = None,
-        json_body: Optional[Dict[str, Any]] = None,
-        timeout: int = 30,
-        retry_on_401: bool = True,
-    ) -> Any:
-        url = f"{self.api_base}{path}"
-        r = requests.request(
-            method=method.upper(),
-            url=url,
-            headers=self._headers(),
-            params=params,
-            json=json_body,
-            timeout=timeout,
-        )
-
-        # Se token invalidou antes do esperado: refresh e tenta 1x
-        if r.status_code == 401 and retry_on_401:
+    def _request(self, method: str, path: str, *, params: dict | None = None, json: dict | None = None, timeout: int = 30, _retried: bool = False):
+        """
+        Request centralizada:
+        - adiciona headers
+        - se 401: refresh token e retry 1x
+        """
+        if self._is_token_expired():
             self._refresh_token()
-            return self._request(
-                method,
-                path,
-                params=params,
-                json_body=json_body,
-                timeout=timeout,
-                retry_on_401=False,
-            )
+
+        url = f"{self.api_base}{path}"
+        r = requests.request(method, url, headers=self._headers(), params=params, json=json, timeout=timeout)
+
+        if r.status_code == 401 and not _retried:
+            self._refresh_token()
+            return self._request(method, path, params=params, json=json, timeout=timeout, _retried=True)
 
         if r.status_code >= 400:
             raise RuntimeError(f"ContaAzul API error {r.status_code}: {r.text}")
 
-        # Algumas rotas podem devolver número puro (text/plain)
-        ct = (r.headers.get("content-type") or "").lower()
-        if "application/json" in ct:
+        if r.text and r.text.strip().startswith("{"):
+            return r.json()
+        if r.text and r.text.strip().startswith("["):
             return r.json()
         return r.text
 
-    # ---------------- Endpoints CA ----------------
+    # ---------- ENDPOINTS CA ----------
     def get_next_sale_number(self) -> int:
-        raw = self._request("GET", "/v1/venda/proximo-numero", timeout=20)
+        resp = self._request("GET", "/v1/venda/proximo-numero", timeout=20)
+        # às vezes retorna string "380"
         try:
-            return int(str(raw).strip())
+            return int(str(resp).strip())
         except Exception:
-            raise RuntimeError(f"Resposta inesperada do próximo número: {raw}")
+            raise RuntimeError("Resposta inesperada do próximo número")
+
+    def list_financial_accounts(self):
+        # Conta Azul: lista contas financeiras
+        return self._request("GET", "/v1/conta-financeira", timeout=30)
+
+    def list_products(self, busca: str, pagina: int = 1, tamanho_pagina: int = 50, status: str = "ATIVO"):
+        params = {
+            "pagina": pagina,
+            "tamanho_pagina": tamanho_pagina,
+            "busca": busca,
+            "status": status,
+        }
+        return self._request("GET", "/v1/produtos", params=params, timeout=30)
 
     def list_people(self, nome: str, tipo_perfil: str = "Cliente") -> dict:
-        return self._request(
-            "GET",
-            "/v1/pessoas",
-            params={"nome": nome, "tipo_perfil": tipo_perfil},
-            timeout=20,
-        )
+        params = {"nome": nome, "tipo_perfil": tipo_perfil}
+        return self._request("GET", "/v1/pessoas", params=params, timeout=30)
 
     def create_person_cliente(self, nome: str) -> dict:
         payload = {
@@ -177,11 +163,7 @@ class ContaAzulClient:
             "perfis": [{"tipo_perfil": "Cliente"}],
             "ativo": True,
         }
-        return self._request("POST", "/v1/pessoas", json_body=payload, timeout=30)
-
-    def list_financial_accounts(self) -> dict:
-        # contas financeiras
-        return self._request("GET", "/v1/conta-financeira", timeout=20)
+        return self._request("POST", "/v1/pessoas", json=payload, timeout=30)
 
     def create_sale(self, payload: dict) -> dict:
-        return self._request("POST", "/v1/venda", json_body=payload, timeout=60)
+        return self._request("POST", "/v1/venda", json=payload, timeout=60)

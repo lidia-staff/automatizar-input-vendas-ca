@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -10,6 +11,13 @@ from app.services.conta_azul_client import ContaAzulClient
 router = APIRouter(tags=["companies"])
 
 
+class DefaultItemIn(BaseModel):
+    default_item_id: str
+
+
+# -------------------------------------------------------------------
+# Criar Company
+# -------------------------------------------------------------------
 @router.post("/companies")
 def create_company(name: str = Body(..., embed=True)):
     db: Session = SessionLocal()
@@ -27,6 +35,9 @@ def create_company(name: str = Body(..., embed=True)):
         db.close()
 
 
+# -------------------------------------------------------------------
+# Listar Companies
+# -------------------------------------------------------------------
 @router.get("/companies")
 def list_companies():
     db: Session = SessionLocal()
@@ -39,6 +50,7 @@ def list_companies():
                 "has_token": bool(c.access_token),
                 "token_expires_at": c.token_expires_at,
                 "ca_financial_account_id": c.ca_financial_account_id,
+                "default_item_id": c.default_item_id,
             }
             for c in companies
         ]
@@ -46,6 +58,9 @@ def list_companies():
         db.close()
 
 
+# -------------------------------------------------------------------
+# Buscar Company por ID
+# -------------------------------------------------------------------
 @router.get("/companies/{company_id}")
 def get_company(company_id: int):
     db: Session = SessionLocal()
@@ -60,11 +75,15 @@ def get_company(company_id: int):
             "has_token": bool(company.access_token),
             "token_expires_at": company.token_expires_at,
             "ca_financial_account_id": company.ca_financial_account_id,
+            "default_item_id": company.default_item_id,
         }
     finally:
         db.close()
 
 
+# -------------------------------------------------------------------
+# Salvar / Atualizar Tokens OAuth Conta Azul (fallback manual)
+# -------------------------------------------------------------------
 @router.post("/companies/{company_id}/tokens")
 def set_company_tokens(
     company_id: int,
@@ -81,6 +100,7 @@ def set_company_tokens(
         company.access_token = access_token
         company.refresh_token = refresh_token
         company.token_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
+        db.add(company)
         db.commit()
 
         return {"ok": True, "company_id": company_id, "token_expires_at": company.token_expires_at}
@@ -88,8 +108,12 @@ def set_company_tokens(
         db.close()
 
 
+# -------------------------------------------------------------------
+# Conta Azul - Contas Financeiras
+# -------------------------------------------------------------------
 @router.get("/companies/{company_id}/ca/financial-accounts")
 def ca_list_financial_accounts(company_id: int):
+    # valida company existe
     db: Session = SessionLocal()
     try:
         c = db.query(Company).filter(Company.id == company_id).first()
@@ -109,10 +133,40 @@ def ca_set_financial_account(company_id: int, ca_financial_account_id: str = Bod
         c = db.query(Company).filter(Company.id == company_id).first()
         if not c:
             raise HTTPException(status_code=404, detail="Company not found")
-
         c.ca_financial_account_id = ca_financial_account_id
         db.add(c)
         db.commit()
-        return {"ok": True, "company_id": company_id, "ca_financial_account_id": ca_financial_account_id}
+        db.refresh(c)
+        return {"ok": True, "company_id": company_id, "ca_financial_account_id": c.ca_financial_account_id}
+    finally:
+        db.close()
+
+
+# -------------------------------------------------------------------
+# Conta Azul - Produtos/Serviços (Inventário) por busca
+# -------------------------------------------------------------------
+@router.get("/companies/{company_id}/ca/products")
+def ca_list_products(company_id: int, busca: str, pagina: int = 1, tamanho_pagina: int = 50):
+    client = ContaAzulClient(company_id=company_id)
+    return client.list_products(busca=busca, pagina=pagina, tamanho_pagina=tamanho_pagina)
+
+
+# -------------------------------------------------------------------
+# Definir item/serviço padrão (fallback) para vendas
+# -------------------------------------------------------------------
+@router.post("/companies/{company_id}/default-item")
+def set_default_item(company_id: int, body: DefaultItemIn):
+    db: Session = SessionLocal()
+    try:
+        c = db.query(Company).filter(Company.id == company_id).first()
+        if not c:
+            raise HTTPException(status_code=404, detail="Company não encontrada")
+
+        c.default_item_id = body.default_item_id
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+
+        return {"ok": True, "company_id": company_id, "default_item_id": c.default_item_id}
     finally:
         db.close()

@@ -7,10 +7,7 @@ from app.services.conta_azul_client import ContaAzulClient
 from app.services.contaazul_people import get_or_create_customer_uuid
 from app.services.ca_sale_builder import build_ca_sale_payload
 
-# ✅ Export padrão que o main.py espera
 router = APIRouter(tags=["sales"])
-
-# ✅ Alias de compatibilidade (se em algum lugar estiverem usando sales_router)
 sales_router = router
 
 
@@ -25,8 +22,7 @@ def list_sales(company_id: int | None = None, batch_id: int | None = None, statu
             q = q.filter(Sale.batch_id == batch_id)
         if status is not None:
             q = q.filter(Sale.status == status)
-        rows = q.order_by(Sale.id.asc()).all()
-        return rows
+        return q.order_by(Sale.id.asc()).all()
     finally:
         db.close()
 
@@ -46,13 +42,6 @@ def get_sale(sale_id: int):
 
 @router.post("/sales/{sale_id}/send_to_ca")
 def send_to_ca(sale_id: int):
-    """
-    Envia a venda para Conta Azul:
-    - refresh token automático
-    - garante cliente (pessoa) existe e pega UUID
-    - pega próximo número disponível
-    - monta payload no padrão /v1/venda
-    """
     db: Session = SessionLocal()
     try:
         sale = db.query(Sale).filter(Sale.id == sale_id).first()
@@ -76,7 +65,6 @@ def send_to_ca(sale_id: int):
         client = ContaAzulClient(company_id=company.id)
 
         customer_uuid = get_or_create_customer_uuid(client, sale.customer_name)
-
         numero = client.get_next_sale_number()
 
         payload = build_ca_sale_payload(
@@ -86,6 +74,20 @@ def send_to_ca(sale_id: int):
             items=items,
             id_conta_financeira=company.ca_financial_account_id,
         )
+
+        # ✅ Fallback: se itens não tiverem "id", usa o default_item_id da company
+        if company.default_item_id:
+            for it in payload.get("itens", []):
+                if not it.get("id"):
+                    it["id"] = company.default_item_id
+
+        # Se ainda não tiver id em algum item, dá erro claro antes de chamar CA
+        for it in payload.get("itens", []):
+            if not it.get("id"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Item sem 'id' e Company sem default_item_id. Configure /companies/{id}/default-item.",
+                )
 
         resp = client.create_sale(payload)
 
@@ -101,7 +103,6 @@ def send_to_ca(sale_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        # registra erro e não derruba API
         try:
             s2 = db.query(Sale).filter(Sale.id == sale_id).first()
             if s2:
