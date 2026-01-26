@@ -1,46 +1,53 @@
 from datetime import date
 from typing import Dict
 
-# ==============================
-# MAPAS DE CONTA AZUL
-# ==============================
 
-# Tipos de pagamento aceitos pelo Conta Azul
-PAYMENT_METHOD_MAP = {
-    "PIX": "PIX_PAGAMENTO_INSTANTANEO",
-    "DINHEIRO": "DINHEIRO",
-    "CARTAO_CREDITO": "CARTAO_CREDITO",
-    "CARTAO_DEBITO": "CARTAO_DEBITO",
-    "TRANSFERENCIA": "TRANSFERENCIA_BANCARIA",
-}
+def _normalize_payment_method(raw: str) -> str:
+    """
+    Recebe strings da planilha tipo:
+    - "Pix"
+    - "Cartão de crédito via outros bancos"
+    - "Boleto via outros bancos"
+    e retorna o enum do Conta Azul.
+    """
+    s = (raw or "").strip().upper()
 
-# ⚠️ Estes IDs você ajusta por empresa depois
-# Por enquanto funciona como default
-DEFAULT_FINANCIAL_ACCOUNTS = {
-    "PIX": "UUID_CONTA_PIX",
-    "DINHEIRO": "UUID_CONTA_CAIXA",
-    "CARTAO_CREDITO": "UUID_CONTA_CARTAO",
-    "CARTAO_DEBITO": "UUID_CONTA_CARTAO",
-    "TRANSFERENCIA": "UUID_CONTA_BANCO",
-}
+    if "PIX" in s:
+        return "PIX_PAGAMENTO_INSTANTANEO"
+    if "BOLETO" in s:
+        return "BOLETO_BANCARIO"
+    if "CRÉDITO" in s or "CREDITO" in s:
+        return "CARTAO_CREDITO"
+    if "DÉBITO" in s or "DEBITO" in s:
+        return "CARTAO_DEBITO"
+    if "TRANSFER" in s:
+        return "TRANSFERENCIA_BANCARIA"
+    if "DINHEIRO" in s:
+        return "DINHEIRO"
+
+    # fallback seguro (Conta Azul aceita OUTRO)
+    return "OUTRO"
 
 
-# ==============================
-# FUNÇÕES AUXILIARES
-# ==============================
+def _parcelas_qtd(payment_terms: str) -> int:
+    t = (payment_terms or "").strip().upper()
+    # exemplos: "À vista", "1x", "5x", "10x"
+    if "À VISTA" in t or "A VISTA" in t:
+        return 1
+    digits = "".join([c for c in t if c.isdigit()])
+    if digits:
+        try:
+            n = int(digits)
+            return max(1, n)
+        except Exception:
+            return 1
+    return 1
 
-def _build_parcelas(
-    total: float,
-    due_date: date,
-    parcelas: int = 1,
-):
-    """Gera parcelas iguais"""
+
+def _build_parcelas(total: float, due_date: date, parcelas: int = 1):
     valor_parcela = round(total / parcelas, 2)
     return [
-        {
-            "data_vencimento": str(due_date),
-            "valor": valor_parcela,
-        }
+        {"data_vencimento": str(due_date), "valor": valor_parcela}
         for _ in range(parcelas)
     ]
 
@@ -58,33 +65,17 @@ def _build_itens(sale) -> list:
     return itens
 
 
-# ==============================
-# BUILDER PRINCIPAL
-# ==============================
-
 def build_ca_payload(sale) -> Dict:
     """
     Constrói o payload de venda para o Conta Azul.
-    REGRA FIXA: SEMPRE EM_ANDAMENTO (revisão pendente).
+    Observação: NÃO define id_conta_financeira aqui.
+    Isso é responsabilidade do ca_sale_builder (Company.ca_financial_account_id).
     """
-
-    payment_method = sale.payment_method.upper()
-    payment_terms = sale.payment_terms or ""
-
-    tipo_pagamento = PAYMENT_METHOD_MAP.get(payment_method)
-    if not tipo_pagamento:
-        raise ValueError(f"Forma de pagamento não suportada: {payment_method}")
-
-    # Número de parcelas (default = 1)
-    parcelas_qtd = 1
-    if "PARCEL" in payment_terms.upper():
-        try:
-            parcelas_qtd = int("".join(filter(str.isdigit, payment_terms)))
-        except Exception:
-            parcelas_qtd = 1
+    tipo_pagamento = _normalize_payment_method(sale.payment_method)
+    n_parcelas = _parcelas_qtd(sale.payment_terms or "")
 
     payload = {
-        "situacao": "EM_ANDAMENTO",  # 🔒 REGRA DE OURO
+        "situacao": "EM_ANDAMENTO",
         "data_venda": str(sale.sale_date),
         "observacoes": (
             "Venda importada automaticamente.\n"
@@ -93,20 +84,13 @@ def build_ca_payload(sale) -> Dict:
         "itens": _build_itens(sale),
         "condicao_pagamento": {
             "tipo_pagamento": tipo_pagamento,
-            "opcao_condicao_pagamento": "À vista"
-            if parcelas_qtd == 1
-            else f"{parcelas_qtd}x",
+            "opcao_condicao_pagamento": "À vista" if n_parcelas == 1 else f"{n_parcelas}x",
             "parcelas": _build_parcelas(
                 total=float(sale.total_amount),
                 due_date=sale.due_date,
-                parcelas=parcelas_qtd,
+                parcelas=n_parcelas,
             ),
         },
     }
-
-    # Conta financeira (se existir)
-    account_id = DEFAULT_FINANCIAL_ACCOUNTS.get(payment_method)
-    if account_id:
-        payload["condicao_pagamento"]["id_conta_financeira"] = account_id
 
     return payload
