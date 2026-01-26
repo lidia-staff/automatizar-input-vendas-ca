@@ -31,7 +31,7 @@ def contaazul_start(company_id: int):
     redirect_uri = _env_or_fail("CA_REDIRECT_URI")
 
     # scope default (pode ajustar via variável)
-    scope = "sales customers financial-accounts"
+    scope = "sales"
 
     nonce = secrets.token_urlsafe(16)
     state = f"{company_id}:{nonce}"
