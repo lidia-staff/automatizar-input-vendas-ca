@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, HTTPException
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -9,10 +8,6 @@ from app.db.models import Company
 from app.services.conta_azul_client import ContaAzulClient
 
 router = APIRouter(tags=["companies"])
-
-
-class DefaultItemIn(BaseModel):
-    default_item_id: str
 
 
 # -------------------------------------------------------------------
@@ -30,6 +25,7 @@ def create_company(name: str = Body(..., embed=True)):
         db.add(company)
         db.commit()
         db.refresh(company)
+
         return {"id": company.id, "name": company.name}
     finally:
         db.close()
@@ -42,64 +38,65 @@ def create_company(name: str = Body(..., embed=True)):
 def list_companies():
     db: Session = SessionLocal()
     try:
-        companies = db.query(Company).order_by(Company.id.asc()).all()
+        rows = db.query(Company).order_by(Company.id.asc()).all()
         return [
             {
                 "id": c.id,
                 "name": c.name,
-                "has_token": bool(c.access_token),
+                "has_token": bool(c.refresh_token),
                 "token_expires_at": c.token_expires_at,
                 "ca_financial_account_id": c.ca_financial_account_id,
-                "default_item_id": c.default_item_id,
+                "default_item_id": getattr(c, "default_item_id", None),
             }
-            for c in companies
+            for c in rows
         ]
     finally:
         db.close()
 
 
 # -------------------------------------------------------------------
-# Buscar Company por ID
+# Get Company
 # -------------------------------------------------------------------
 @router.get("/companies/{company_id}")
 def get_company(company_id: int):
     db: Session = SessionLocal()
     try:
-        company = db.query(Company).filter(Company.id == company_id).first()
-        if not company:
-            raise HTTPException(status_code=404, detail="Company not found")
+        c = db.query(Company).filter(Company.id == company_id).first()
+        if not c:
+            raise HTTPException(status_code=404, detail="Company não encontrada")
 
         return {
-            "id": company.id,
-            "name": company.name,
-            "has_token": bool(company.access_token),
-            "token_expires_at": company.token_expires_at,
-            "ca_financial_account_id": company.ca_financial_account_id,
-            "default_item_id": company.default_item_id,
+            "id": c.id,
+            "name": c.name,
+            "has_token": bool(c.refresh_token),
+            "token_expires_at": c.token_expires_at,
+            "ca_financial_account_id": c.ca_financial_account_id,
+            "default_item_id": getattr(c, "default_item_id", None),
         }
     finally:
         db.close()
 
 
 # -------------------------------------------------------------------
-# Salvar / Atualizar Tokens OAuth Conta Azul (fallback manual)
+# Set Company Tokens (manual / fallback)
 # -------------------------------------------------------------------
 @router.post("/companies/{company_id}/tokens")
 def set_company_tokens(
     company_id: int,
-    access_token: str = Body(...),
-    refresh_token: str = Body(...),
-    expires_in: int = Body(3600),
+    access_token: str = Body(..., embed=True),
+    refresh_token: str = Body(..., embed=True),
+    expires_in: int = Body(3600, embed=True),
 ):
     db: Session = SessionLocal()
     try:
         company = db.query(Company).filter(Company.id == company_id).first()
         if not company:
-            raise HTTPException(status_code=404, detail="Company not found")
+            raise HTTPException(status_code=404, detail="Company não encontrada")
 
         company.access_token = access_token
         company.refresh_token = refresh_token
         company.token_expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in))
+
         db.add(company)
         db.commit()
 
@@ -109,7 +106,7 @@ def set_company_tokens(
 
 
 # -------------------------------------------------------------------
-# Conta Azul - Contas Financeiras
+# Conta Azul - Financial Accounts
 # -------------------------------------------------------------------
 @router.get("/companies/{company_id}/ca/financial-accounts")
 def ca_list_financial_accounts(company_id: int):
@@ -118,7 +115,7 @@ def ca_list_financial_accounts(company_id: int):
     try:
         c = db.query(Company).filter(Company.id == company_id).first()
         if not c:
-            raise HTTPException(status_code=404, detail="Company not found")
+            raise HTTPException(status_code=404, detail="Company não encontrada")
     finally:
         db.close()
 
@@ -132,41 +129,12 @@ def ca_set_financial_account(company_id: int, ca_financial_account_id: str = Bod
     try:
         c = db.query(Company).filter(Company.id == company_id).first()
         if not c:
-            raise HTTPException(status_code=404, detail="Company not found")
+            raise HTTPException(status_code=404, detail="Company não encontrada")
+
         c.ca_financial_account_id = ca_financial_account_id
         db.add(c)
         db.commit()
-        db.refresh(c)
-        return {"ok": True, "company_id": company_id, "ca_financial_account_id": c.ca_financial_account_id}
-    finally:
-        db.close()
 
-
-# -------------------------------------------------------------------
-# Conta Azul - Produtos/Serviços (Inventário) por busca
-# -------------------------------------------------------------------
-@router.get("/companies/{company_id}/ca/products")
-def ca_list_products(company_id: int, busca: str, pagina: int = 1, tamanho_pagina: int = 50):
-    client = ContaAzulClient(company_id=company_id)
-    return client.list_products(busca=busca, pagina=pagina, tamanho_pagina=tamanho_pagina)
-
-
-# -------------------------------------------------------------------
-# Definir item/serviço padrão (fallback) para vendas
-# -------------------------------------------------------------------
-@router.post("/companies/{company_id}/default-item")
-def set_default_item(company_id: int, body: DefaultItemIn):
-    db: Session = SessionLocal()
-    try:
-        c = db.query(Company).filter(Company.id == company_id).first()
-        if not c:
-            raise HTTPException(status_code=404, detail="Company não encontrada")
-
-        c.default_item_id = body.default_item_id
-        db.add(c)
-        db.commit()
-        db.refresh(c)
-
-        return {"ok": True, "company_id": company_id, "default_item_id": c.default_item_id}
+        return {"ok": True, "company_id": company_id, "ca_financial_account_id": ca_financial_account_id}
     finally:
         db.close()
