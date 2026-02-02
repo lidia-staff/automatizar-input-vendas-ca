@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Date, DateTime, Numeric, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.session import Base
+from sqlalchemy import UniqueConstraint, Index
 
 
 class Company(Base):
@@ -24,6 +25,7 @@ class Company(Base):
 
     batches = relationship("UploadBatch", back_populates="company", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="company", cascade="all, delete-orphan")
+    customers = relationship("CompanyCustomer", back_populates="company", cascade="all, delete-orphan")
 
 
 class UploadBatch(Base):
@@ -81,3 +83,24 @@ class SaleItem(Base):
     line_total = Column(Numeric(12, 2), nullable=False)
 
     sale = relationship("Sale", back_populates="items")
+
+class CompanyCustomer(Base):
+    __tablename__ = "company_customers"
+    __table_args__ = (
+        UniqueConstraint("company_id", "customer_key", name="uq_company_customer_key"),
+        Index("ix_company_customers_company_key", "company_id", "customer_key"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+
+    customer_key = Column(String(250), nullable=False)
+    customer_name = Column(String(200), nullable=True)
+    ca_customer_id = Column(String(80), nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    company = relationship("Company", back_populates="customers")
+
+
