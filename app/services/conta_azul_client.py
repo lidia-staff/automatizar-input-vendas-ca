@@ -3,6 +3,7 @@ import datetime as dt
 import requests
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+import traceback
 
 from app.db.session import SessionLocal
 from app.db.models import Company
@@ -10,20 +11,11 @@ from app.db.models import Company
 
 class ContaAzulClient:
     """
-    Cliente Conta Azul com Token Manager automático:
-    
-    ✅ Lê tokens do banco por company_id
-    ✅ Refresh automático quando token expira
-    ✅ Retry 1x em 401 (refresh + retry)
-    ✅ Lock no banco para evitar race condition
-    ✅ Persistência automática de novos tokens
-    
-    Uso:
-        client = ContaAzulClient(company_id=1)
-        vendas = client.list_sales()  # já gerencia token automaticamente
+    Cliente Conta Azul com Token Manager automático + LOGS DETALHADOS
     """
 
     def __init__(self, company_id: int):
+        print(f"[CA_CLIENT] Inicializando para company_id={company_id}")
         self.company_id = company_id
 
         self.api_base = os.getenv("CA_API_BASE_URL", "https://api-v2.contaazul.com").rstrip("/")
@@ -31,23 +23,40 @@ class ContaAzulClient:
 
         self.client_id = os.getenv("CA_CLIENT_ID")
         self.client_secret = os.getenv("CA_CLIENT_SECRET")
+        
+        print(f"[CA_CLIENT] API Base: {self.api_base}")
+        print(f"[CA_CLIENT] Client ID configurado: {bool(self.client_id)}")
+        
         if not self.client_id or not self.client_secret:
             raise RuntimeError("CA_CLIENT_ID ou CA_CLIENT_SECRET não configurados")
 
         # Carrega tokens do banco
-        self._load_company_tokens()
+        try:
+            self._load_company_tokens()
+            print(f"[CA_CLIENT] Tokens carregados com sucesso")
+        except Exception as e:
+            print(f"[CA_CLIENT] ERRO ao carregar tokens: {e}")
+            raise
 
         # Pré-refresh se já nasceu expirado
         if self._is_token_expired():
+            print(f"[CA_CLIENT] Token expirado, fazendo refresh preventivo")
             self._refresh_token()
 
     def _load_company_tokens(self):
         """Carrega access_token, refresh_token e expires_at do banco."""
+        print(f"[CA_CLIENT] Carregando tokens do banco para company_id={self.company_id}")
         db: Session = SessionLocal()
         try:
             c = db.query(Company).filter(Company.id == self.company_id).first()
             if not c:
                 raise RuntimeError(f"Company {self.company_id} não encontrada")
+            
+            print(f"[CA_CLIENT] Company encontrada: {c.name}")
+            print(f"[CA_CLIENT] Has access_token: {bool(c.access_token)}")
+            print(f"[CA_CLIENT] Has refresh_token: {bool(c.refresh_token)}")
+            print(f"[CA_CLIENT] Token expires_at: {c.token_expires_at}")
+            
             if not c.refresh_token:
                 raise RuntimeError(
                     f"Company {self.company_id} sem refresh_token. "
@@ -75,17 +84,16 @@ class ContaAzulClient:
         return value.astimezone(dt.timezone.utc)
 
     def _is_token_expired(self) -> bool:
-        """
-        Verifica se token está expirado (com margem de 2min de segurança).
-        
-        Returns:
-            True se expirado ou sem expires_at
-        """
+        """Verifica se token está expirado (com margem de 2min de segurança)."""
         exp = self._as_aware_utc(self.token_expires_at)
         if exp is None:
+            print(f"[CA_CLIENT] Token sem expires_at, considerando expirado")
             return True
-        # Margem de segurança de 2 minutos
-        return self._now_utc() >= (exp - dt.timedelta(minutes=2))
+        
+        now = self._now_utc()
+        expired = now >= (exp - dt.timedelta(minutes=2))
+        print(f"[CA_CLIENT] Token expirado? {expired} (now={now}, expires={exp})")
+        return expired
 
     def _headers(self):
         """Headers para requests ao Conta Azul."""
@@ -96,18 +104,9 @@ class ContaAzulClient:
         }
 
     def _refresh_token(self):
-        """
-        Renova access_token usando refresh_token e persiste no banco.
-        
-        ✅ Lê refresh_token mais recente do banco (evita usar token velho)
-        ✅ Usa lock (FOR UPDATE) para reduzir race condition
-        ✅ Persiste novos tokens no banco
-        ✅ Atualiza tokens em memória
-        
-        Raises:
-            RuntimeError: Se refresh falhar (ex: invalid_grant)
-        """
-        print(f"[TOKEN] Refreshing token for company {self.company_id}...")
+        """Renova access_token usando refresh_token e persiste no banco."""
+        print(f"[CA_CLIENT] ===== INICIANDO REFRESH TOKEN =====")
+        print(f"[CA_CLIENT] Company ID: {self.company_id}")
 
         # 1) Lê refresh_token mais recente do banco
         db: Session = SessionLocal()
@@ -121,10 +120,12 @@ class ContaAzulClient:
                     "Reautorize em /api/contaazul/start"
                 )
             refresh_to_use = c.refresh_token
+            print(f"[CA_CLIENT] Refresh token carregado do banco")
         finally:
             db.close()
 
         # 2) Chama endpoint de refresh do Conta Azul
+        print(f"[CA_CLIENT] Fazendo POST para {self.auth_url}")
         try:
             r = requests.post(
                 self.auth_url,
@@ -133,11 +134,13 @@ class ContaAzulClient:
                 data={"grant_type": "refresh_token", "refresh_token": refresh_to_use},
                 timeout=30,
             )
+            print(f"[CA_CLIENT] Refresh response status: {r.status_code}")
         except requests.RequestException as e:
+            print(f"[CA_CLIENT] ERRO de rede no refresh: {e}")
             raise RuntimeError(f"Erro de rede ao fazer refresh: {e}")
 
         if r.status_code >= 400:
-            # Ex: invalid_grant = refresh_token expirado/inválido
+            print(f"[CA_CLIENT] ERRO no refresh: {r.status_code} - {r.text}")
             raise RuntimeError(
                 f"Token refresh failed [{r.status_code}]: {r.text}. "
                 f"Reautorize a company {self.company_id} em /api/contaazul/start"
@@ -146,14 +149,16 @@ class ContaAzulClient:
         data = r.json()
         new_access = data.get("access_token")
         if not new_access:
+            print(f"[CA_CLIENT] ERRO: Refresh não retornou access_token: {data}")
             raise RuntimeError(f"Refresh retornou sem access_token: {data}")
 
-        # Refresh token pode ou não vir novo (depende do provedor)
         new_refresh = data.get("refresh_token", refresh_to_use)
         expires_in = int(data.get("expires_in", 3600))
         new_expires_at = self._now_utc() + dt.timedelta(seconds=expires_in)
+        
+        print(f"[CA_CLIENT] Novo access_token obtido, expires_in={expires_in}s")
 
-        # 3) Persiste com lock (FOR UPDATE) para reduzir race condition
+        # 3) Persiste com lock
         db = SessionLocal()
         try:
             c = (
@@ -170,17 +175,19 @@ class ContaAzulClient:
             c.token_expires_at = new_expires_at
             db.add(c)
             db.commit()
-            print(f"[TOKEN] ✅ Token refreshed for company {self.company_id}")
+            print(f"[CA_CLIENT] ✅ Tokens salvos no banco")
         except SQLAlchemyError as e:
             db.rollback()
+            print(f"[CA_CLIENT] ERRO ao salvar tokens: {e}")
             raise RuntimeError(f"Erro ao persistir tokens no banco: {e}")
         finally:
             db.close()
 
-        # 4) Atualiza tokens em memória
+        # 4) Atualiza em memória
         self.access_token = new_access
         self.refresh_token = new_refresh
         self.token_expires_at = new_expires_at
+        print(f"[CA_CLIENT] ===== REFRESH CONCLUÍDO COM SUCESSO =====")
 
     def _request(
         self,
@@ -192,34 +199,18 @@ class ContaAzulClient:
         timeout: int = 30,
         _retried: bool = False,
     ):
-        """
-        Request centralizada com Token Manager automático.
+        """Request centralizada com Token Manager automático."""
+        print(f"[CA_CLIENT] ===== REQUEST =====")
+        print(f"[CA_CLIENT] {method} {path}")
+        print(f"[CA_CLIENT] Params: {params}")
         
-        Estratégia:
-        1. Verifica se token está perto de expirar -> refresh preventivo
-        2. Faz request
-        3. Se 401 e não tentou retry -> refresh + retry 1x
-        4. Se 401 após retry -> erro fatal (reautorizar)
-        
-        Args:
-            method: GET, POST, etc
-            path: /v1/venda, etc
-            params: query params
-            json: body JSON
-            timeout: timeout em segundos
-            _retried: controle interno de retry
-        
-        Returns:
-            Response JSON (dict/list) ou texto
-        
-        Raises:
-            RuntimeError: Em caso de erro
-        """
         # Pré-refresh se perto de expirar
         if self._is_token_expired():
+            print(f"[CA_CLIENT] Token perto de expirar, fazendo refresh preventivo")
             self._refresh_token()
 
         url = f"{self.api_base}{path}"
+        print(f"[CA_CLIENT] URL completa: {url}")
         
         try:
             r = requests.request(
@@ -230,12 +221,15 @@ class ContaAzulClient:
                 json=json, 
                 timeout=timeout
             )
+            print(f"[CA_CLIENT] Response status: {r.status_code}")
         except requests.RequestException as e:
+            print(f"[CA_CLIENT] ERRO de rede: {e}")
+            print(f"[CA_CLIENT] Traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Erro de rede ao chamar {method} {path}: {e}")
 
-        # Retry automático em 401 (token pode ter expirado entre requests)
+        # Retry automático em 401
         if r.status_code == 401 and not _retried:
-            print(f"[TOKEN] 401 detected, refreshing and retrying...")
+            print(f"[CA_CLIENT] 401 detectado, fazendo refresh e retry")
             self._refresh_token()
             
             try:
@@ -247,11 +241,14 @@ class ContaAzulClient:
                     json=json, 
                     timeout=timeout
                 )
+                print(f"[CA_CLIENT] Response após retry: {r.status_code}")
             except requests.RequestException as e:
+                print(f"[CA_CLIENT] ERRO no retry: {e}")
                 raise RuntimeError(f"Erro de rede no retry: {e}")
 
-        # Se ainda 401 após refresh -> problema sério
+        # Se ainda 401 após refresh
         if r.status_code == 401:
+            print(f"[CA_CLIENT] 401 após refresh - token inválido")
             raise RuntimeError(
                 f"401 Unauthorized após refresh. "
                 f"Company {self.company_id} precisa reautorizar em /api/contaazul/start"
@@ -259,6 +256,7 @@ class ContaAzulClient:
 
         # Outros erros HTTP
         if r.status_code >= 400:
+            print(f"[CA_CLIENT] ERRO HTTP {r.status_code}: {r.text}")
             raise RuntimeError(
                 f"Conta Azul API error [{r.status_code}] {method} {path}: {r.text}"
             )
@@ -266,7 +264,11 @@ class ContaAzulClient:
         # Parse response
         txt = (r.text or "").strip()
         if txt.startswith("{") or txt.startswith("["):
-            return r.json()
+            result = r.json()
+            print(f"[CA_CLIENT] Response JSON (primeiros 200 chars): {str(result)[:200]}")
+            return result
+        
+        print(f"[CA_CLIENT] Response texto: {txt[:200]}")
         return txt
 
     # ========== ENDPOINTS CONTA AZUL ==========
@@ -281,18 +283,11 @@ class ContaAzulClient:
 
     def list_financial_accounts(self):
         """Lista contas financeiras da empresa no Conta Azul."""
+        print(f"[CA_CLIENT] Listando contas financeiras")
         return self._request("GET", "/v1/conta-financeira", timeout=30)
 
     def list_products(self, busca: str, pagina: int = 1, tamanho_pagina: int = 50, status: str = "ATIVO"):
-        """
-        Lista produtos/serviços.
-        
-        Args:
-            busca: termo de busca
-            pagina: número da página
-            tamanho_pagina: itens por página
-            status: ATIVO, INATIVO, etc
-        """
+        """Lista produtos/serviços."""
         params = {
             "pagina": pagina, 
             "tamanho_pagina": tamanho_pagina, 
@@ -302,29 +297,12 @@ class ContaAzulClient:
         return self._request("GET", "/v1/produtos", params=params, timeout=30)
 
     def list_people(self, nome: str, tipo_perfil: str = "Cliente") -> dict:
-        """
-        Lista pessoas (clientes, fornecedores, etc).
-        
-        Args:
-            nome: nome para buscar
-            tipo_perfil: Cliente, Fornecedor, etc
-        
-        Returns:
-            Lista de pessoas encontradas
-        """
+        """Lista pessoas (clientes, fornecedores, etc)."""
         params = {"nome": nome, "tipo_perfil": tipo_perfil}
         return self._request("GET", "/v1/pessoas", params=params, timeout=30)
 
     def create_person_cliente(self, nome: str) -> dict:
-        """
-        Cria novo cliente no Conta Azul.
-        
-        Args:
-            nome: nome do cliente
-        
-        Returns:
-            Dados do cliente criado (incluindo 'id')
-        """
+        """Cria novo cliente no Conta Azul."""
         payload = {
             "nome": nome,
             "tipo_pessoa": "Física",
@@ -334,13 +312,5 @@ class ContaAzulClient:
         return self._request("POST", "/v1/pessoas", json=payload, timeout=30)
 
     def create_sale(self, payload: dict) -> dict:
-        """
-        Cria venda no Conta Azul.
-        
-        Args:
-            payload: payload completo da venda
-        
-        Returns:
-            Response do CA (incluindo 'id' da venda criada)
-        """
+        """Cria venda no Conta Azul."""
         return self._request("POST", "/v1/venda", json=payload, timeout=60)
