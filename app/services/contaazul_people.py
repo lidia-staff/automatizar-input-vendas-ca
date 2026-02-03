@@ -1,6 +1,7 @@
 import unicodedata
-from app.services.conta_azul_client import ContaAzulClient
 from sqlalchemy.orm import Session
+
+from app.services.conta_azul_client import ContaAzulClient
 from app.db.models import CompanyCustomer
 
 
