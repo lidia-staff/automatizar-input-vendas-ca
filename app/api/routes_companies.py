@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import traceback
 
 from fastapi import APIRouter, Body, HTTPException
 from sqlalchemy.orm import Session
@@ -106,21 +107,75 @@ def set_company_tokens(
 
 
 # -------------------------------------------------------------------
-# Conta Azul - Financial Accounts
+# Conta Azul - Financial Accounts (COM TRATAMENTO DE ERRO DETALHADO)
 # -------------------------------------------------------------------
 @router.get("/companies/{company_id}/ca/financial-accounts")
 def ca_list_financial_accounts(company_id: int):
-    # valida company existe
+    """
+    Lista contas financeiras do Conta Azul.
+    VERSÃO COM LOGS E TRATAMENTO DE ERRO DETALHADO.
+    """
+    print(f"[ENDPOINT] ===== INICIANDO ca_list_financial_accounts =====")
+    print(f"[ENDPOINT] company_id={company_id}")
+    
+    # Valida company existe
     db: Session = SessionLocal()
     try:
+        print(f"[ENDPOINT] Buscando company no banco...")
         c = db.query(Company).filter(Company.id == company_id).first()
         if not c:
+            print(f"[ENDPOINT] ERRO: Company {company_id} não encontrada")
             raise HTTPException(status_code=404, detail="Company não encontrada")
+        
+        print(f"[ENDPOINT] Company encontrada: {c.name}")
+        print(f"[ENDPOINT] Has access_token: {bool(c.access_token)}")
+        print(f"[ENDPOINT] Has refresh_token: {bool(c.refresh_token)}")
+        
     finally:
         db.close()
 
-    client = ContaAzulClient(company_id=company_id)
-    return client.list_financial_accounts()
+    # Tenta criar client e fazer request
+    try:
+        print(f"[ENDPOINT] Criando ContaAzulClient...")
+        client = ContaAzulClient(company_id=company_id)
+        print(f"[ENDPOINT] Client criado com sucesso")
+        
+        print(f"[ENDPOINT] Chamando list_financial_accounts()...")
+        result = client.list_financial_accounts()
+        print(f"[ENDPOINT] Sucesso! Retornando resultado")
+        
+        return result
+        
+    except RuntimeError as e:
+        error_msg = str(e)
+        print(f"[ENDPOINT] ERRO RuntimeError: {error_msg}")
+        print(f"[ENDPOINT] Traceback completo:")
+        print(traceback.format_exc())
+        
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "runtime_error",
+                "message": error_msg,
+                "traceback": traceback.format_exc(),
+            }
+        )
+    
+    except Exception as e:
+        error_msg = str(e)
+        error_type = type(e).__name__
+        print(f"[ENDPOINT] ERRO {error_type}: {error_msg}")
+        print(f"[ENDPOINT] Traceback completo:")
+        print(traceback.format_exc())
+        
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": error_type,
+                "message": error_msg,
+                "traceback": traceback.format_exc(),
+            }
+        )
 
 
 @router.post("/companies/{company_id}/ca/financial-account")
