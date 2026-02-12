@@ -9,6 +9,7 @@ class Company(Base):
     __tablename__ = "companies"
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False)
+    slug = Column(String(100), nullable=True, unique=True)  # ex: body-face
     review_mode = Column(Boolean, default=True)
     access_token = Column(Text, nullable=True)
     refresh_token = Column(Text, nullable=True)

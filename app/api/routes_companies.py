@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import traceback
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Body, HTTPException
@@ -14,18 +15,34 @@ router = APIRouter(tags=["companies"])
 VALID_PAYMENT_KEYS = ["PIX", "CARTAO_CREDITO", "CARTAO_DEBITO", "BOLETO", "TRANSFERENCIA", "DINHEIRO", "OUTRO"]
 
 
+def _slugify(text: str) -> str:
+    import unicodedata
+    text = unicodedata.normalize("NFD", text).encode("ASCII", "ignore").decode("ASCII")
+    text = text.lower().strip()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = text.strip("-")
+    return text
+
+
 @router.post("/companies")
-def create_company(name: str = Body(..., embed=True)):
+def create_company(name: str = Body(..., embed=True), slug: Optional[str] = Body(None, embed=True)):
     db: Session = SessionLocal()
     try:
         existing = db.query(Company).filter(Company.name == name).first()
         if existing:
-            return {"id": existing.id, "name": existing.name, "message": "Company já existente"}
-        company = Company(name=name)
+            return {"id": existing.id, "name": existing.name, "slug": existing.slug, "message": "Já existente"}
+        final_slug = slug.strip() if slug else _slugify(name)
+        # garante slug único
+        base = final_slug
+        counter = 1
+        while db.query(Company).filter(Company.slug == final_slug).first():
+            final_slug = f"{base}-{counter}"
+            counter += 1
+        company = Company(name=name, slug=final_slug)
         db.add(company)
         db.commit()
         db.refresh(company)
-        return {"id": company.id, "name": company.name}
+        return {"id": company.id, "name": company.name, "slug": company.slug}
     finally:
         db.close()
 
@@ -35,11 +52,28 @@ def list_companies():
     db: Session = SessionLocal()
     try:
         rows = db.query(Company).order_by(Company.id.asc()).all()
-        return [{"id": c.id, "name": c.name, "has_token": bool(c.refresh_token),
-                 "token_expires_at": c.token_expires_at,
+        return [{"id": c.id, "name": c.name, "slug": c.slug,
+                 "has_token": bool(c.refresh_token), "token_expires_at": c.token_expires_at,
                  "ca_financial_account_id": c.ca_financial_account_id,
                  "default_item_id": getattr(c, "default_item_id", None),
                  "review_mode": c.review_mode} for c in rows]
+    finally:
+        db.close()
+
+
+@router.get("/companies/by-slug/{slug}")
+def get_company_by_slug(slug: str):
+    """Busca empresa pelo slug. Usado pelo painel para carregar por URL."""
+    db: Session = SessionLocal()
+    try:
+        c = db.query(Company).filter(Company.slug == slug).first()
+        if not c:
+            raise HTTPException(status_code=404, detail=f"Empresa com slug '{slug}' não encontrada")
+        return {"id": c.id, "name": c.name, "slug": c.slug,
+                "has_token": bool(c.refresh_token), "token_expires_at": c.token_expires_at,
+                "ca_financial_account_id": c.ca_financial_account_id,
+                "default_item_id": getattr(c, "default_item_id", None),
+                "review_mode": c.review_mode}
     finally:
         db.close()
 
@@ -51,11 +85,31 @@ def get_company(company_id: int):
         c = db.query(Company).filter(Company.id == company_id).first()
         if not c:
             raise HTTPException(status_code=404, detail="Company não encontrada")
-        return {"id": c.id, "name": c.name, "has_token": bool(c.refresh_token),
-                "token_expires_at": c.token_expires_at,
+        return {"id": c.id, "name": c.name, "slug": c.slug,
+                "has_token": bool(c.refresh_token), "token_expires_at": c.token_expires_at,
                 "ca_financial_account_id": c.ca_financial_account_id,
                 "default_item_id": getattr(c, "default_item_id", None),
                 "review_mode": c.review_mode}
+    finally:
+        db.close()
+
+
+@router.patch("/companies/{company_id}")
+def update_company(company_id: int, name: Optional[str] = Body(None, embed=True),
+                   slug: Optional[str] = Body(None, embed=True),
+                   review_mode: Optional[bool] = Body(None, embed=True)):
+    db: Session = SessionLocal()
+    try:
+        c = db.query(Company).filter(Company.id == company_id).first()
+        if not c:
+            raise HTTPException(status_code=404, detail="Company não encontrada")
+        if name: c.name = name
+        if slug: c.slug = slug.strip()
+        if review_mode is not None: c.review_mode = review_mode
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        return {"id": c.id, "name": c.name, "slug": c.slug}
     finally:
         db.close()
 
@@ -113,7 +167,6 @@ def ca_set_financial_account(company_id: int, ca_financial_account_id: str = Bod
 
 @router.get("/companies/{company_id}/payment-accounts")
 def list_payment_accounts(company_id: int):
-    """Lista mapeamento forma de pagamento → conta financeira."""
     db: Session = SessionLocal()
     try:
         c = db.query(Company).filter(Company.id == company_id).first()
@@ -121,29 +174,23 @@ def list_payment_accounts(company_id: int):
             raise HTTPException(status_code=404, detail="Company não encontrada")
         mappings = db.query(CompanyPaymentAccount).filter(
             CompanyPaymentAccount.company_id == company_id).all()
-        return {
-            "company_id": company_id,
-            "company_name": c.name,
-            "default_account": c.ca_financial_account_id,
-            "mappings": [{"id": m.id, "payment_method_key": m.payment_method_key,
-                          "ca_financial_account_id": m.ca_financial_account_id,
-                          "label": m.label} for m in mappings],
-            "valid_keys": VALID_PAYMENT_KEYS,
-        }
+        return {"company_id": company_id, "company_name": c.name,
+                "default_account": c.ca_financial_account_id,
+                "mappings": [{"id": m.id, "payment_method_key": m.payment_method_key,
+                              "ca_financial_account_id": m.ca_financial_account_id,
+                              "label": m.label} for m in mappings],
+                "valid_keys": VALID_PAYMENT_KEYS}
     finally:
         db.close()
 
 
 @router.post("/companies/{company_id}/payment-accounts")
-def set_payment_account(company_id: int,
-                        payment_method_key: str = Body(..., embed=True),
+def set_payment_account(company_id: int, payment_method_key: str = Body(..., embed=True),
                         ca_financial_account_id: str = Body(..., embed=True),
                         label: Optional[str] = Body(None, embed=True)):
-    """Cria ou atualiza mapeamento forma de pagamento → conta financeira."""
     key = payment_method_key.strip().upper()
     if key not in VALID_PAYMENT_KEYS:
-        raise HTTPException(status_code=400,
-                            detail=f"Chave inválida: '{key}'. Válidas: {VALID_PAYMENT_KEYS}")
+        raise HTTPException(status_code=400, detail=f"Chave inválida: '{key}'. Válidas: {VALID_PAYMENT_KEYS}")
     db: Session = SessionLocal()
     try:
         c = db.query(Company).filter(Company.id == company_id).first()
@@ -168,7 +215,6 @@ def set_payment_account(company_id: int,
 
 @router.delete("/companies/{company_id}/payment-accounts/{payment_method_key}")
 def delete_payment_account(company_id: int, payment_method_key: str):
-    """Remove mapeamento de uma forma de pagamento."""
     key = payment_method_key.strip().upper()
     db: Session = SessionLocal()
     try:

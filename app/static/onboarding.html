@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Novo Cliente — Onboarding</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #232323; --border: #2e2e2e;
+    --accent: #00e5a0; --accent-dim: rgba(0,229,160,0.12); --danger: #ff4f4f;
+    --warn: #f5a623; --text: #e8e8e8; --muted: #666; --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif;
+         font-size: 14px; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .container { width: 100%; max-width: 580px; }
+  .header { text-align: center; margin-bottom: 32px; }
+  .header h1 { font-size: 24px; font-weight: 600; }
+  .header p { color: var(--muted); margin-top: 6px; }
+
+  /* STEPS INDICATOR */
+  .steps { display: flex; align-items: center; justify-content: center; margin-bottom: 36px; gap: 0; }
+  .step-dot { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .step-circle { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--border);
+                 display: flex; align-items: center; justify-content: center; font-size: 12px;
+                 font-weight: 600; color: var(--muted); transition: all .3s; background: var(--surface); }
+  .step-circle.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .step-circle.done { border-color: var(--accent); background: var(--accent); color: #000; }
+  .step-label { font-size: 11px; color: var(--muted); text-align: center; max-width: 70px; line-height: 1.3; }
+  .step-label.active { color: var(--accent); }
+  .step-line { width: 48px; height: 2px; background: var(--border); margin: 0 4px; margin-bottom: 22px; transition: all .3s; }
+  .step-line.done { background: var(--accent); }
+
+  /* CARD */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
+  .card h2 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+  .card p.desc { color: var(--muted); font-size: 13px; margin-bottom: 22px; line-height: 1.6; }
+
+  /* FORM */
+  .form-group { margin-bottom: 16px; }
+  label { font-size: 11px; font-weight: 600; color: var(--muted); display: block;
+          margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+  input, select { width: 100%; background: var(--surface2); border: 1px solid var(--border);
+                  color: var(--text); padding: 10px 12px; border-radius: var(--radius);
+                  font-size: 13px; font-family: inherit; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* BUTTONS */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; border-radius: var(--radius);
+         font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all .15s; }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { background: #00c98a; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: var(--border); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-group { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; }
+
+  /* PAYMENT MAPPING TABLE */
+  .mapping-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .mapping-label { font-size: 12px; font-weight: 500; width: 130px; flex-shrink: 0; }
+  .mapping-row select { flex: 1; }
+  .badge-key { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 20px;
+               font-size: 11px; font-weight: 600; background: rgba(255,255,255,.08); color: var(--muted); }
+
+  /* SUCCESS */
+  .success-box { text-align: center; padding: 8px 0; }
+  .success-icon { font-size: 48px; margin-bottom: 16px; }
+  .success-box h2 { font-size: 20px; color: var(--accent); margin-bottom: 8px; }
+  .success-box p { color: var(--muted); margin-bottom: 6px; font-size: 13px; }
+  .url-box { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+             padding: 12px; font-family: 'DM Mono', monospace; font-size: 13px; color: var(--accent);
+             margin: 16px 0; word-break: break-all; cursor: pointer; }
+  .url-box:hover { border-color: var(--accent); }
+
+  /* OAUTH BOX */
+  .oauth-box { background: var(--accent-dim); border: 1px solid rgba(0,229,160,.3);
+               border-radius: var(--radius); padding: 16px; text-align: center; margin: 16px 0; }
+  .oauth-box p { font-size: 13px; margin-bottom: 12px; }
+
+  /* SPINNER */
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.2);
+             border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface);
+           border: 1px solid var(--border); padding: 12px 16px; border-radius: var(--radius);
+           font-size: 13px; animation: slideIn .2s ease; z-index: 99; }
+  .toast-success { border-left: 3px solid var(--accent); }
+  .toast-error { border-left: 3px solid var(--danger); }
+  @keyframes slideIn { from { transform: translateX(20px); opacity:0; } to { transform: translateX(0); opacity:1; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>Configurar Novo Cliente</h1>
+    <p>Siga os passos para adicionar uma empresa ao sistema</p>
+  </div>
+
+  <!-- STEPS -->
+  <div class="steps">
+    <div class="step-dot">
+      <div class="step-circle active" id="sc1">1</div>
+      <div class="step-label active" id="sl1">Empresa</div>
+    </div>
+    <div class="step-line" id="line1"></div>
+    <div class="step-dot">
+      <div class="step-circle" id="sc2">2</div>
+      <div class="step-label" id="sl2">Autorizar CA</div>
+    </div>
+    <div class="step-line" id="line2"></div>
+    <div class="step-dot">
+      <div class="step-circle" id="sc3">3</div>
+      <div class="step-label" id="sl3">Contas</div>
+    </div>
+    <div class="step-line" id="line3"></div>
+    <div class="step-dot">
+      <div class="step-circle" id="sc4">4</div>
+      <div class="step-label" id="sl4">Concluído</div>
+    </div>
+  </div>
+
+  <!-- STEP 1: CRIAR EMPRESA -->
+  <div class="card" id="step1">
+    <h2>1. Dados da Empresa</h2>
+    <p class="desc">Informe o nome do cliente e o slug que será usado na URL do painel.</p>
+    <div class="form-group">
+      <label>Nome da Empresa</label>
+      <input type="text" id="companyName" placeholder="Ex: Body & Face" oninput="autoSlug()">
+    </div>
+    <div class="form-group">
+      <label>Slug da URL</label>
+      <input type="text" id="companySlug" placeholder="Ex: body-face">
+      <div class="hint">URL gerada: <span id="slugPreview" style="color:var(--accent)">staffconsult.com.br/painel/body-face</span></div>
+    </div>
+    <div class="btn-group">
+      <a href="/painel" class="btn btn-secondary">← Voltar ao Painel</a>
+      <button class="btn btn-primary" onclick="step1Next()">Próximo →</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: OAUTH -->
+  <div class="card" id="step2" style="display:none">
+    <h2>2. Autorizar Conta Azul</h2>
+    <p class="desc">Clique no botão abaixo para abrir a tela de login do Conta Azul. Após autorizar, volte aqui e clique em "Já autorizei".</p>
+    <div class="oauth-box">
+      <p>Empresa: <strong id="step2-company-name"></strong></p>
+      <button class="btn btn-primary" onclick="openOAuth()">🔐 Abrir Conta Azul</button>
+    </div>
+    <p style="color:var(--muted);font-size:12px;text-align:center">Após autorizar no Conta Azul, clique em "Já autorizei" abaixo</p>
+    <div class="btn-group">
+      <button class="btn btn-secondary" onclick="goStep(1)">← Voltar</button>
+      <button class="btn btn-primary" id="btnOAuthDone" onclick="step2Next()">Já autorizei →</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: MAPEAR CONTAS -->
+  <div class="card" id="step3" style="display:none">
+    <h2>3. Contas por Pagamento</h2>
+    <p class="desc">Selecione qual conta financeira corresponde a cada forma de pagamento desta empresa.</p>
+    <div id="mapping-form">
+      <div style="text-align:center;padding:20px"><div class="spinner"></div><p style="margin-top:8px;color:var(--muted);font-size:12px">Carregando contas...</p></div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-secondary" onclick="goStep(2)">← Voltar</button>
+      <button class="btn btn-primary" onclick="step3Next()">Salvar e Concluir →</button>
+    </div>
+  </div>
+
+  <!-- STEP 4: CONCLUÍDO -->
+  <div class="card" id="step4" style="display:none">
+    <div class="success-box">
+      <div class="success-icon">🎉</div>
+      <h2>Cliente configurado!</h2>
+      <p>A empresa foi criada e configurada com sucesso.</p>
+      <p style="margin-top:4px">URL do painel do cliente:</p>
+      <div class="url-box" id="finalUrl" onclick="copyUrl()">carregando...</div>
+      <p style="font-size:11px;color:var(--muted)">Clique para copiar</p>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:20px">
+        <a id="btnGoPanel" href="#" class="btn btn-primary">Abrir Painel →</a>
+        <button class="btn btn-secondary" onclick="resetForm()">+ Novo Cliente</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let companyId = null;
+let caAccounts = [];
+
+const PAYMENT_LABELS = {
+  PIX: 'PIX',
+  CARTAO_CREDITO: 'Cartão de Crédito',
+  CARTAO_DEBITO: 'Cartão de Débito',
+  BOLETO: 'Boleto Bancário',
+  TRANSFERENCIA: 'Transferência',
+  DINHEIRO: 'Dinheiro',
+};
+
+function autoSlug() {
+  const name = document.getElementById('companyName').value;
+  const slug = name.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  document.getElementById('companySlug').value = slug;
+  document.getElementById('slugPreview').textContent = `staffconsult.com.br/painel/${slug || '...'}`;
+}
+
+document.getElementById('companySlug').addEventListener('input', function() {
+  document.getElementById('slugPreview').textContent = `staffconsult.com.br/painel/${this.value || '...'}`;
+});
+
+function goStep(n) {
+  [1,2,3,4].forEach(i => {
+    document.getElementById('step' + i).style.display = i === n ? 'block' : 'none';
+    const sc = document.getElementById('sc' + i);
+    const sl = document.getElementById('sl' + i);
+    if (i < n) { sc.className = 'step-circle done'; sc.textContent = '✓'; }
+    else if (i === n) { sc.className = 'step-circle active'; sc.textContent = i; sl.className = 'step-label active'; }
+    else { sc.className = 'step-circle'; sc.textContent = i; sl.className = 'step-label'; }
+    if (i < 4) {
+      document.getElementById('line' + i).className = i < n ? 'step-line done' : 'step-line';
+    }
+  });
+}
+
+async function step1Next() {
+  const name = document.getElementById('companyName').value.trim();
+  const slug = document.getElementById('companySlug').value.trim();
+  if (!name) return toast('Informe o nome da empresa', 'error');
+  if (!slug) return toast('Informe o slug', 'error');
+
+  try {
+    const res = await fetch(`${API}/v1/companies`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, slug})
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Erro ao criar empresa');
+    companyId = data.id;
+    document.getElementById('step2-company-name').textContent = data.name;
+    goStep(2);
+  } catch(e) {
+    toast(e.message, 'error');
+  }
+}
+
+function openOAuth() {
+  if (!companyId) return;
+  window.open(`/api/contaazul/start?company_id=${companyId}`, '_blank', 'width=800,height=600');
+}
+
+async function step2Next() {
+  const btn = document.getElementById('btnOAuthDone');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Verificando...';
+  try {
+    const res = await fetch(`${API}/v1/companies/${companyId}`);
+    const data = await res.json();
+    if (!data.has_token) {
+      btn.disabled = false;
+      btn.textContent = 'Já autorizei →';
+      return toast('Token não encontrado. Complete a autorização no Conta Azul primeiro.', 'error');
+    }
+    await loadCAAccountsForMapping();
+    goStep(3);
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Já autorizei →';
+  }
+}
+
+async function loadCAAccountsForMapping() {
+  const el = document.getElementById('mapping-form');
+  try {
+    const res = await fetch(`${API}/v1/companies/${companyId}/ca/financial-accounts`);
+    const data = await res.json();
+    caAccounts = (data.itens || data || []).filter(a => a.ativo);
+
+    const opts = caAccounts.map(a => `<option value="${a.id}">${a.nome}</option>`).join('');
+    el.innerHTML = Object.entries(PAYMENT_LABELS).map(([key, label]) => `
+      <div class="mapping-row">
+        <span class="mapping-label"><span class="badge-key">${label}</span></span>
+        <select id="map-${key}">
+          <option value="">— Não mapear —</option>
+          ${opts}
+        </select>
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = `<p style="color:var(--danger);font-size:13px">Erro ao carregar contas: ${e.message}</p>`;
+  }
+}
+
+async function step3Next() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Salvando...';
+
+  const mappings = [];
+  for (const key of Object.keys(PAYMENT_LABELS)) {
+    const sel = document.getElementById('map-' + key);
+    if (sel && sel.value) {
+      const account = caAccounts.find(a => a.id === sel.value);
+      mappings.push({ payment_method_key: key, ca_financial_account_id: sel.value,
+                      label: account ? account.nome : null });
+    }
+  }
+
+  try {
+    for (const m of mappings) {
+      await fetch(`${API}/v1/companies/${companyId}/payment-accounts`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(m)
+      });
+    }
+
+    // Define conta padrão (primeiro mapeamento ou primeira conta)
+    if (mappings.length > 0) {
+      await fetch(`${API}/v1/companies/${companyId}/ca/financial-account`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ca_financial_account_id: mappings[0].ca_financial_account_id})
+      });
+    }
+
+    const slug = document.getElementById('companySlug').value;
+    const url = `https://staffconsult.com.br/painel/${slug}`;
+    document.getElementById('finalUrl').textContent = url;
+    document.getElementById('btnGoPanel').href = `/painel/${slug}`;
+    goStep(4);
+  } catch(e) {
+    toast('Erro ao salvar mapeamentos: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Salvar e Concluir →';
+  }
+}
+
+function copyUrl() {
+  const url = document.getElementById('finalUrl').textContent;
+  navigator.clipboard.writeText(url).then(() => toast('URL copiada!', 'success'));
+}
+
+function resetForm() {
+  companyId = null;
+  caAccounts = [];
+  document.getElementById('companyName').value = '';
+  document.getElementById('companySlug').value = '';
+  document.getElementById('slugPreview').textContent = 'staffconsult.com.br/painel/...';
+  goStep(1);
+}
+
+function toast(msg, type = 'success') {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+</script>
+</body>
+</html>
