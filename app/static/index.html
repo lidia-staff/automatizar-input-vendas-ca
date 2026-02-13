@@ -352,12 +352,24 @@ async function loadCompanies() {
     const companies = await res.json();
     const sel = document.getElementById('companySelect');
     sel.innerHTML = companies.map(c =>
-      `<option value="${c.id}">${c.name}</option>`
+      `<option value="${c.id}" data-slug="${c.slug || ''}">${c.name}</option>`
     ).join('');
-    if (companies.length > 0) {
-      currentCompanyId = companies[0].id;
-      loadDashboard();
+
+    // Auto-seleciona pelo slug da URL (ex: /painel/body-face)
+    const pathSlug = window.location.pathname.split('/painel/')[1];
+    let matched = false;
+    if (pathSlug) {
+      const company = companies.find(c => c.slug === pathSlug);
+      if (company) {
+        sel.value = company.id;
+        currentCompanyId = company.id;
+        matched = true;
+      }
     }
+    if (!matched && companies.length > 0) {
+      currentCompanyId = companies[0].id;
+    }
+    loadDashboard();
   } catch(e) {
     toast('Erro ao carregar empresas', 'error');
   }

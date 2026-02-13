@@ -133,7 +133,7 @@
     <div class="form-group">
       <label>Slug da URL</label>
       <input type="text" id="companySlug" placeholder="Ex: body-face">
-      <div class="hint">URL gerada: <span id="slugPreview" style="color:var(--accent)">staffconsult.com.br/painel/body-face</span></div>
+      <div class="hint">URL gerada: <span id="slugPreview" style="color:var(--accent)">app.staffconsult.com.br/painel/body-face</span></div>
     </div>
     <div class="btn-group">
       <a href="/painel" class="btn btn-secondary">← Voltar ao Painel</a>
@@ -206,11 +206,11 @@ function autoSlug() {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   document.getElementById('companySlug').value = slug;
-  document.getElementById('slugPreview').textContent = `staffconsult.com.br/painel/${slug || '...'}`;
+  document.getElementById('slugPreview').textContent = `app.staffconsult.com.br/painel/${slug || '...'}`;
 }
 
 document.getElementById('companySlug').addEventListener('input', function() {
-  document.getElementById('slugPreview').textContent = `staffconsult.com.br/painel/${this.value || '...'}`;
+  document.getElementById('slugPreview').textContent = `app.staffconsult.com.br/painel/${this.value || '...'}`;
 });
 
 function goStep(n) {
@@ -331,7 +331,7 @@ async function step3Next() {
     }
 
     const slug = document.getElementById('companySlug').value;
-    const url = `https://staffconsult.com.br/painel/${slug}`;
+    const url = `https://app.staffconsult.com.br/painel/${slug}`;
     document.getElementById('finalUrl').textContent = url;
     document.getElementById('btnGoPanel').href = `/painel/${slug}`;
     goStep(4);
@@ -353,7 +353,7 @@ function resetForm() {
   caAccounts = [];
   document.getElementById('companyName').value = '';
   document.getElementById('companySlug').value = '';
-  document.getElementById('slugPreview').textContent = 'staffconsult.com.br/painel/...';
+  document.getElementById('slugPreview').textContent = 'app.staffconsult.com.br/painel/...';
   goStep(1);
 }
 
