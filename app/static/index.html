@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Conta Azul — Automação de Vendas</title>
+<title>Staff Connect — Painel</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -143,10 +143,11 @@
         <span class="nav-icon">⚙️</span> Configurações
       </div>
     </nav>
-    <div class="company-selector">
+    <div class="company-selector" id="companySelectorWrap">
       <select id="companySelect" onchange="onCompanyChange()">
         <option value="">Carregando...</option>
       </select>
+      <div id="companyFixed" style="display:none;padding:8px 4px;font-size:13px;font-weight:600;color:var(--text)"></div>
     </div>
   </aside>
 
@@ -356,18 +357,32 @@ async function loadCompanies() {
     ).join('');
 
     // Auto-seleciona pelo slug da URL (ex: /painel/body-face)
-    const pathSlug = window.location.pathname.split('/painel/')[1];
+    const pathParts = window.location.pathname.split('/painel/');
+    const pathSlug = pathParts.length > 1 ? pathParts[1].replace(/\/$/,'') : '';
     let matched = false;
     if (pathSlug) {
-      const company = companies.find(c => c.slug === pathSlug);
+      const toSlug = s => (s||'').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+      const company = companies.find(c => c.slug === pathSlug)
+                   || companies.find(c => toSlug(c.name) === pathSlug);
       if (company) {
-        sel.value = company.id;
-        currentCompanyId = company.id;
+        sel.value = String(company.id);
+        currentCompanyId = String(company.id);
         matched = true;
       }
     }
     if (!matched && companies.length > 0) {
-      currentCompanyId = companies[0].id;
+      sel.value = String(companies[0].id);
+      currentCompanyId = String(companies[0].id);
+    }
+    // Se veio por slug: esconde dropdown e mostra nome fixo
+    if (pathSlug && matched) {
+      const company = companies.find(c => String(c.id) === String(currentCompanyId));
+      document.getElementById('companySelect').style.display = 'none';
+      const fixed = document.getElementById('companyFixed');
+      fixed.style.display = 'block';
+      fixed.textContent = company ? company.name : '';
     }
     loadDashboard();
   } catch(e) {
