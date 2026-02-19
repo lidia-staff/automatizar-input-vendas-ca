@@ -32,7 +32,7 @@ def gerar_extrato_diario_pdf(client, conta_id: str, conta_nome: str, data: datet
     data_str = data.strftime("%Y-%m-%d")
     
     # Endpoint: GET /v1/financeiro/eventos-financeiros/contas-a-pagar/buscar
-    # e GET /v1/financeiro/eventos-financeiros/contas-a-receber/buscar
+    # IMPORTANTE: API exige data_vencimento_de e data_vencimento_ate (não data_competencia)
     
     despesas_response = client._request(
         "GET",
@@ -40,8 +40,8 @@ def gerar_extrato_diario_pdf(client, conta_id: str, conta_nome: str, data: datet
         params={
             "pagina": 1,
             "tamanho_pagina": 100,
-            "data_competencia_de": data_str,
-            "data_competencia_ate": data_str,
+            "data_vencimento_de": data_str,
+            "data_vencimento_ate": data_str,
             "ids_contas_financeiras": [conta_id]
         }
     )
@@ -52,8 +52,8 @@ def gerar_extrato_diario_pdf(client, conta_id: str, conta_nome: str, data: datet
         params={
             "pagina": 1,
             "tamanho_pagina": 100,
-            "data_competencia_de": data_str,
-            "data_competencia_ate": data_str,
+            "data_vencimento_de": data_str,
+            "data_vencimento_ate": data_str,
             "ids_contas_financeiras": [conta_id]
         }
     )
