@@ -282,9 +282,40 @@ class ContaAzulClient:
             raise RuntimeError(f"Resposta inesperada do próximo número: {resp}")
 
     def list_financial_accounts(self):
-        """Lista contas financeiras da empresa no Conta Azul."""
-        print(f"[CA_CLIENT] Listando contas financeiras")
-        return self._request("GET", "/v1/conta-financeira", timeout=30)
+        """Lista TODAS as contas financeiras com paginação."""
+        print(f"[CA_CLIENT] Listando contas financeiras (com paginação)")
+        
+        all_accounts = []
+        page = 1
+        page_size = 100  # Máximo permitido pela API
+        
+        while True:
+            params = {"page": page, "size": page_size}
+            print(f"[CA_CLIENT] Buscando página {page} (size={page_size})")
+            
+            response = self._request("GET", "/v1/conta-financeira", params=params, timeout=30)
+            
+            # API pode retornar lista direta ou objeto paginado
+            if isinstance(response, list):
+                # Sem paginação - retorna tudo
+                print(f"[CA_CLIENT] API retornou lista direta com {len(response)} contas")
+                return response
+            elif isinstance(response, dict):
+                # Com paginação
+                accounts = response.get("items", response.get("data", response.get("content", [])))
+                all_accounts.extend(accounts)
+                print(f"[CA_CLIENT] Página {page}: {len(accounts)} contas (total acumulado: {len(all_accounts)})")
+                
+                # Verifica se tem mais páginas
+                total = response.get("total", response.get("totalElements", 0))
+                if len(accounts) < page_size or (total > 0 and len(all_accounts) >= total):
+                    break
+                page += 1
+            else:
+                break
+        
+        print(f"[CA_CLIENT] Total de contas carregadas: {len(all_accounts)}")
+        return all_accounts
 
     def list_products(self, busca: str, pagina: int = 1, tamanho_pagina: int = 50, status: str = "ATIVO"):
         """Lista produtos/serviços."""
