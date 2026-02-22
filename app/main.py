@@ -7,7 +7,6 @@ from app.api.routes_upload import router as upload_router
 from app.api.routes_sales import router as sales_router
 from app.api.routes_companies import router as companies_router
 from app.api.routes_oauth import router as oauth_router
-from app.api import routes_bpo
 
 from app.db.session import Base, engine
 from app.db import models  # noqa: F401
@@ -18,7 +17,18 @@ app.include_router(upload_router, prefix="/v1")
 app.include_router(sales_router, prefix="/v1")
 app.include_router(companies_router, prefix="/v1")
 app.include_router(oauth_router)
-app.include_router(routes_bpo.router)
+
+# DEBUG ENDPOINT
+@app.get("/debug/env")
+def debug_env():
+    """Endpoint temporário para verificar variáveis de ambiente"""
+    return {
+        "CA_CLIENT_ID": "OK" if os.getenv("CA_CLIENT_ID") else "MISSING",
+        "CA_CLIENT_SECRET": "OK" if os.getenv("CA_CLIENT_SECRET") else "MISSING",
+        "CA_REDIRECT_URI": os.getenv("CA_REDIRECT_URI"),
+        "CA_API_BASE_URL": os.getenv("CA_API_BASE_URL"),
+        "DATABASE_URL": "OK" if os.getenv("DATABASE_URL") else "MISSING",
+    }
 
 
 def _load_html():
