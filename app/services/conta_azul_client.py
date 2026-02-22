@@ -283,39 +283,57 @@ class ContaAzulClient:
 
     def list_financial_accounts(self):
         """Lista TODAS as contas financeiras com paginação."""
-        print(f"[CA_CLIENT] Listando contas financeiras (com paginação)")
+        print(f"[CA_CLIENT] Listando contas financeiras")
         
-        all_accounts = []
-        page = 1
-        page_size = 100  # Máximo permitido pela API
+        # Primeiro tenta sem paginação (a API do CA pode retornar tudo de uma vez)
+        response = self._request("GET", "/v1/conta-financeira", timeout=30)
+        print(f"[CA_CLIENT] Tipo da resposta: {type(response)}")
         
-        while True:
-            params = {"page": page, "size": page_size}
-            print(f"[CA_CLIENT] Buscando página {page} (size={page_size})")
+        # Se retornou lista direta, retorna tudo
+        if isinstance(response, list):
+            print(f"[CA_CLIENT] API retornou lista direta com {len(response)} contas")
+            return response
+        
+        # Se retornou dict, pode ter paginação
+        if isinstance(response, dict):
+            # Tenta extrair a lista de itens
+            accounts = response.get("itens", response.get("items", response.get("data", response.get("content", []))))
+            total = response.get("itens_totais", response.get("total", response.get("totalElements", len(accounts))))
             
-            response = self._request("GET", "/v1/conta-financeira", params=params, timeout=30)
+            print(f"[CA_CLIENT] Resposta paginada: {len(accounts)} contas de {total} totais")
             
-            # API pode retornar lista direta ou objeto paginado
-            if isinstance(response, list):
-                # Sem paginação - retorna tudo
-                print(f"[CA_CLIENT] API retornou lista direta com {len(response)} contas")
-                return response
-            elif isinstance(response, dict):
-                # Com paginação - API do CA usa 'itens' (português)
-                accounts = response.get("itens", response.get("items", response.get("data", response.get("content", []))))
-                all_accounts.extend(accounts)
-                print(f"[CA_CLIENT] Página {page}: {len(accounts)} contas (total acumulado: {len(all_accounts)})")
+            # Se pegou tudo de uma vez, retorna
+            if len(accounts) >= total:
+                return accounts
+            
+            # Senão, busca as próximas páginas
+            all_accounts = list(accounts)
+            page = 2
+            page_size = 50
+            
+            while len(all_accounts) < total:
+                params = {"page": page, "size": page_size}
+                print(f"[CA_CLIENT] Buscando página {page}")
                 
-                # Verifica se tem mais páginas
-                total = response.get("itens_totais", response.get("total", response.get("totalElements", 0)))
-                if len(accounts) < page_size or (total > 0 and len(all_accounts) >= total):
+                page_response = self._request("GET", "/v1/conta-financeira", params=params, timeout=30)
+                
+                if isinstance(page_response, dict):
+                    page_accounts = page_response.get("itens", page_response.get("items", []))
+                    if not page_accounts:
+                        break
+                    all_accounts.extend(page_accounts)
+                    print(f"[CA_CLIENT] Página {page}: +{len(page_accounts)} contas (total: {len(all_accounts)})")
+                else:
                     break
+                
                 page += 1
-            else:
-                break
+            
+            print(f"[CA_CLIENT] Total final: {len(all_accounts)} contas")
+            return all_accounts
         
-        print(f"[CA_CLIENT] Total de contas carregadas: {len(all_accounts)}")
-        return all_accounts
+        # Fallback
+        print(f"[CA_CLIENT] Resposta inesperada, retornando vazio")
+        return []
 
     def list_products(self, busca: str, pagina: int = 1, tamanho_pagina: int = 50, status: str = "ATIVO"):
         """Lista produtos/serviços."""
