@@ -283,57 +283,40 @@ class ContaAzulClient:
 
     def list_financial_accounts(self):
         """Lista TODAS as contas financeiras com paginação."""
-        print(f"[CA_CLIENT] Listando contas financeiras")
+        print(f"[CA_CLIENT] Listando contas financeiras (paginação PT)")
         
-        # Primeiro tenta sem paginação (a API do CA pode retornar tudo de uma vez)
-        response = self._request("GET", "/v1/conta-financeira", timeout=30)
-        print(f"[CA_CLIENT] Tipo da resposta: {type(response)}")
+        all_accounts = []
+        pagina = 1
+        tamanho_pagina = 50
         
-        # Se retornou lista direta, retorna tudo
-        if isinstance(response, list):
-            print(f"[CA_CLIENT] API retornou lista direta com {len(response)} contas")
-            return response
-        
-        # Se retornou dict, pode ter paginação
-        if isinstance(response, dict):
-            # Tenta extrair a lista de itens
-            accounts = response.get("itens", response.get("items", response.get("data", response.get("content", []))))
-            total = response.get("itens_totais", response.get("total", response.get("totalElements", len(accounts))))
+        while True:
+            params = {"pagina": pagina, "tamanho_pagina": tamanho_pagina}
+            print(f"[CA_CLIENT] Buscando página {pagina} (tamanho: {tamanho_pagina})")
             
-            print(f"[CA_CLIENT] Resposta paginada: {len(accounts)} contas de {total} totais")
+            response = self._request("GET", "/v1/conta-financeira", params=params, timeout=30)
             
-            # Se pegou tudo de uma vez, retorna
-            if len(accounts) >= total:
-                return accounts
-            
-            # Senão, busca as próximas páginas
-            all_accounts = list(accounts)
-            page = 2
-            page_size = 50
-            
-            while len(all_accounts) < total:
-                params = {"page": page, "size": page_size}
-                print(f"[CA_CLIENT] Buscando página {page}")
+            if isinstance(response, dict):
+                # API do CA usa 'itens' e 'itens_totais'
+                accounts = response.get("itens", [])
+                total = response.get("itens_totais", 0)
                 
-                page_response = self._request("GET", "/v1/conta-financeira", params=params, timeout=30)
+                all_accounts.extend(accounts)
+                print(f"[CA_CLIENT] Página {pagina}: +{len(accounts)} contas | Total: {len(all_accounts)}/{total}")
                 
-                if isinstance(page_response, dict):
-                    page_accounts = page_response.get("itens", page_response.get("items", []))
-                    if not page_accounts:
-                        break
-                    all_accounts.extend(page_accounts)
-                    print(f"[CA_CLIENT] Página {page}: +{len(page_accounts)} contas (total: {len(all_accounts)})")
-                else:
+                # Para se não tiver mais contas ou chegou no total
+                if not accounts or len(all_accounts) >= total:
                     break
-                
-                page += 1
-            
-            print(f"[CA_CLIENT] Total final: {len(all_accounts)} contas")
-            return all_accounts
+                    
+                pagina += 1
+            elif isinstance(response, list):
+                # Retornou lista direta
+                print(f"[CA_CLIENT] Lista direta: {len(response)} contas")
+                return response
+            else:
+                break
         
-        # Fallback
-        print(f"[CA_CLIENT] Resposta inesperada, retornando vazio")
-        return []
+        print(f"[CA_CLIENT] Total carregado: {len(all_accounts)} contas")
+        return all_accounts
 
     def list_products(self, busca: str, pagina: int = 1, tamanho_pagina: int = 50, status: str = "ATIVO"):
         """Lista produtos/serviços."""
