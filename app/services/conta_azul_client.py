@@ -301,13 +301,13 @@ class ContaAzulClient:
                 print(f"[CA_CLIENT] API retornou lista direta com {len(response)} contas")
                 return response
             elif isinstance(response, dict):
-                # Com paginação
-                accounts = response.get("items", response.get("data", response.get("content", [])))
+                # Com paginação - API do CA usa 'itens' (português)
+                accounts = response.get("itens", response.get("items", response.get("data", response.get("content", []))))
                 all_accounts.extend(accounts)
                 print(f"[CA_CLIENT] Página {page}: {len(accounts)} contas (total acumulado: {len(all_accounts)})")
                 
                 # Verifica se tem mais páginas
-                total = response.get("total", response.get("totalElements", 0))
+                total = response.get("itens_totais", response.get("total", response.get("totalElements", 0)))
                 if len(accounts) < page_size or (total > 0 and len(all_accounts) >= total):
                     break
                 page += 1
