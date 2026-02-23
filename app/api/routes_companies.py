@@ -228,3 +228,22 @@ def delete_payment_account(company_id: int, payment_method_key: str):
         return {"ok": True, "deleted": key}
     finally:
         db.close()
+
+
+@router.get("/companies/{company_id}/ca/products")
+def ca_list_products(company_id: int, busca: str = ""):
+    """Lista produtos/serviços do Conta Azul"""
+    db: Session = SessionLocal()
+    try:
+        c = db.query(Company).filter(Company.id == company_id).first()
+        if not c:
+            raise HTTPException(status_code=404, detail="Company não encontrada")
+    finally:
+        db.close()
+    try:
+        client = ContaAzulClient(company_id=company_id)
+        return client.list_products(busca=busca, pagina=1, tamanho_pagina=50)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
