@@ -284,9 +284,15 @@
         
         <div class="form-group">
           <label>Produto Selecionado</label>
-          <select id="defaultProductSelect" style="margin-bottom:8px">
+          <select id="defaultProductSelect" style="margin-bottom:8px" onchange="onProductSelectChange()">
             <option value="">-- Selecione um produto --</option>
           </select>
+        </div>
+        
+        <div class="form-group" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+          <label>OU cole o UUID do produto manualmente</label>
+          <input type="text" id="manualProductInput" placeholder="UUID do produto (ex: 4cf9d5c3-d20d-4dc9-...)">
+          <p style="color:var(--muted);font-size:11px;margin-top:4px">Use esta opção se a API não retornar produtos. Encontre o UUID no DevTools do navegador.</p>
         </div>
         
         <button class="btn btn-primary btn-sm" onclick="saveDefaultProduct()">✅ Salvar Produto Padrão</button>
@@ -687,25 +693,31 @@ async function loadCAAccounts() {
   try {
     const res = await fetch(`${API}/v1/companies/${currentCompanyId}/ca/financial-accounts`);
     const data = await res.json();
-    caAccounts = data.itens || data || [];
+    const allAccounts = data.itens || data || [];
+    
+    // ✅ FILTRAR APENAS ATIVAS
+    caAccounts = allAccounts.filter(a => a.ativo === true || a.active === true);
 
-    // Atualiza select do modal
+    // Atualiza select do modal (já filtrado)
     const sel = document.getElementById('mappingAccount');
     sel.innerHTML = '<option value="">Selecione...</option>' +
-      caAccounts.filter(a => a.ativo).map(a =>
+      caAccounts.map(a =>
         `<option value="${a.id}">${a.nome} (${a.tipo})</option>`
       ).join('');
 
+    // Mostra apenas contas ativas na lista
     el.innerHTML = `
       <table>
-        <tr><th>Nome</th><th>Tipo</th><th>UUID</th><th>Status</th></tr>
+        <tr><th>Nome</th><th>Tipo</th><th>UUID</th></tr>
         ${caAccounts.map(a => `<tr>
           <td>${a.nome}</td>
           <td><span class="badge badge-gray">${a.tipo}</span></td>
           <td><code style="font-size:11px;color:var(--muted)">${a.id}</code></td>
-          <td>${a.ativo ? '<span class="badge badge-green">Ativa</span>' : '<span class="badge badge-gray">Inativa</span>'}</td>
         </tr>`).join('')}
-      </table>`;
+      </table>
+      <p style="color:var(--muted);font-size:11px;margin-top:8px">
+        Exibindo apenas contas ativas (${caAccounts.length} de ${allAccounts.length} total)
+      </p>`;
   } catch(e) {
     el.innerHTML = `<div class="error-detail">${e.message}</div>`;
   }
@@ -782,10 +794,16 @@ async function loadCAProducts() {
     if (!res.ok) throw new Error('Erro ao carregar produtos');
     
     const data = await res.json();
-    const products = data.items || data.itens || [];
+    const allProducts = data.items || data.itens || [];
+    
+    // ✅ FILTRAR APENAS ATIVOS
+    const products = allProducts.filter(p => 
+      p.status === 'ATIVO' || p.ativo === true || p.active === true || 
+      (!p.status && !p.hasOwnProperty('ativo'))  // Se não tem status, assume ativo
+    );
     
     if (products.length === 0) {
-      el.innerHTML = '<div class="error-detail">⚠️ Nenhum produto encontrado. Crie produtos no Conta Azul primeiro.</div>';
+      el.innerHTML = '<div class="error-detail">⚠️ Nenhum produto ativo encontrado. Use o campo manual abaixo ou crie produtos no Conta Azul.</div>';
       return;
     }
     
@@ -807,16 +825,31 @@ async function loadCAProducts() {
         </tr>`).join('')}
       </table>`;
     
-    toast(`${products.length} produto(s) carregado(s)`, 'success');
+    toast(`${products.length} produto(s) ativo(s) carregado(s)`, 'success');
   } catch(e) {
     el.innerHTML = `<div class="error-detail">${e.message}</div>`;
     toast('Erro ao carregar produtos', 'error');
   }
 }
 
+function onProductSelectChange() {
+  // Limpa input manual quando seleciona do dropdown
+  const sel = document.getElementById('defaultProductSelect');
+  if (sel.value) {
+    document.getElementById('manualProductInput').value = '';
+  }
+}
+
 async function saveDefaultProduct() {
-  const productId = document.getElementById('defaultProductSelect').value;
-  if (!productId) return toast('Selecione um produto', 'error');
+  // Aceita UUID do select OU do input manual
+  const selectedId = document.getElementById('defaultProductSelect').value;
+  const manualId = document.getElementById('manualProductInput').value.trim();
+  
+  const productId = selectedId || manualId;
+  
+  if (!productId) {
+    return toast('Selecione um produto ou cole o UUID manualmente', 'error');
+  }
   
   try {
     const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
