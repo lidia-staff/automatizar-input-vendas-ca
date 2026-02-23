@@ -273,6 +273,25 @@
         <button class="btn btn-primary btn-sm" onclick="saveDefaultAccount()">Salvar Conta Padrão</button>
       </div>
 
+      <!-- Produto Padrão (NOVO) -->
+      <div class="card">
+        <div class="card-title">⚠️ Produto/Serviço Padrão <span style="color:var(--danger);font-size:11px">(OBRIGATÓRIO)</span></div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:14px">Todas as vendas serão registradas com este produto. Configure antes de enviar vendas.</p>
+        
+        <div id="products-list" style="margin-bottom:16px">
+          <button class="btn btn-secondary btn-sm" onclick="loadCAProducts()">📦 Carregar Produtos do CA</button>
+        </div>
+        
+        <div class="form-group">
+          <label>Produto Selecionado</label>
+          <select id="defaultProductSelect" style="margin-bottom:8px">
+            <option value="">-- Selecione um produto --</option>
+          </select>
+        </div>
+        
+        <button class="btn btn-primary btn-sm" onclick="saveDefaultProduct()">✅ Salvar Produto Padrão</button>
+      </div>
+
       <!-- OAuth -->
       <div class="card">
         <div class="card-title">Autenticação Conta Azul</div>
@@ -502,7 +521,21 @@ async function doUpload() {
     const res = await fetch(`${API}/v1/uploads`, { method: 'POST', body: fd });
     const data = await res.json();
 
-    if (!res.ok) throw new Error(data.detail || 'Erro no upload');
+    if (!res.ok) {
+      // Tratamento especial para config incompleta
+      if (data.detail && data.detail.includes('config_incomplete')) {
+        const msg = data.detail.replace('config_incomplete: ', '');
+        document.getElementById('upload-result').style.display = 'block';
+        document.getElementById('upload-result').innerHTML = `
+          <div class="error-detail">
+            <strong>⚠️ Configuração Incompleta</strong><br>
+            ${msg}<br><br>
+            <button class="btn btn-primary btn-sm" onclick="showPage('config')">Ir para Configurações</button>
+          </div>`;
+        throw new Error(msg);
+      }
+      throw new Error(data.detail || 'Erro no upload');
+    }
 
     document.getElementById('upload-result').style.display = 'block';
     document.getElementById('upload-result').innerHTML = `
@@ -525,8 +558,10 @@ async function doUpload() {
     clearFile();
   } catch(e) {
     toast(e.message, 'error');
-    document.getElementById('upload-result').style.display = 'block';
-    document.getElementById('upload-result').innerHTML = `<div class="error-detail">${e.message}</div>`;
+    if (!document.getElementById('upload-result').innerHTML.includes('Configuração Incompleta')) {
+      document.getElementById('upload-result').style.display = 'block';
+      document.getElementById('upload-result').innerHTML = `<div class="error-detail">${e.message}</div>`;
+    }
   } finally {
     btn.innerHTML = '📤 Enviar Planilha';
     btn.disabled = false;
@@ -735,6 +770,73 @@ async function saveDefaultAccount() {
     toast(e.message, 'error');
   }
 }
+
+// ===== PRODUTOS (NOVO) =====
+async function loadCAProducts() {
+  if (!currentCompanyId) return;
+  const el = document.getElementById('products-list');
+  el.innerHTML = '<div class="spinner"></div>';
+  
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}/ca/products?busca=`);
+    if (!res.ok) throw new Error('Erro ao carregar produtos');
+    
+    const data = await res.json();
+    const products = data.items || data.itens || [];
+    
+    if (products.length === 0) {
+      el.innerHTML = '<div class="error-detail">⚠️ Nenhum produto encontrado. Crie produtos no Conta Azul primeiro.</div>';
+      return;
+    }
+    
+    // Atualiza select
+    const sel = document.getElementById('defaultProductSelect');
+    sel.innerHTML = '<option value="">-- Selecione um produto --</option>' +
+      products.map(p => 
+        `<option value="${p.id}">${p.name || p.description || p.nome} ${p.code ? '(' + p.code + ')' : ''}</option>`
+      ).join('');
+    
+    // Mostra lista
+    el.innerHTML = `
+      <table>
+        <tr><th>Nome/Descrição</th><th>Código</th><th>UUID</th></tr>
+        ${products.map(p => `<tr>
+          <td>${p.name || p.description || p.nome || '-'}</td>
+          <td>${p.code || p.cnaeCode || '-'}</td>
+          <td><code style="font-size:10px;color:var(--muted)">${p.id}</code></td>
+        </tr>`).join('')}
+      </table>`;
+    
+    toast(`${products.length} produto(s) carregado(s)`, 'success');
+  } catch(e) {
+    el.innerHTML = `<div class="error-detail">${e.message}</div>`;
+    toast('Erro ao carregar produtos', 'error');
+  }
+}
+
+async function saveDefaultProduct() {
+  const productId = document.getElementById('defaultProductSelect').value;
+  if (!productId) return toast('Selecione um produto', 'error');
+  
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ default_item_id: productId })
+    });
+    
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Erro ao salvar');
+    }
+    
+    toast('✅ Produto padrão configurado!', 'success');
+    loadDashboard();
+  } catch(e) {
+    toast(e.message, 'error');
+  }
+}
+// ===== FIM PRODUTOS =====
 
 function openMappingModal() {
   document.getElementById('mappingModal').classList.add('open');

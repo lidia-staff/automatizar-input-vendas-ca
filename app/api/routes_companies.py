@@ -95,17 +95,33 @@ def get_company(company_id: int):
 
 
 @router.patch("/companies/{company_id}")
-def update_company(company_id: int, name: Optional[str] = Body(None, embed=True),
-                   slug: Optional[str] = Body(None, embed=True),
-                   review_mode: Optional[bool] = Body(None, embed=True)):
+def update_company(
+    company_id: int,
+    name: Optional[str] = Body(None, embed=True),
+    slug: Optional[str] = Body(None, embed=True),
+    review_mode: Optional[bool] = Body(None, embed=True),
+    default_item_id: Optional[str] = Body(None, embed=True),
+    ca_financial_account_id: Optional[str] = Body(None, embed=True)
+):
+    """Atualiza dados da empresa (nome, slug, modo revisão, produto padrão, conta padrão)"""
     db: Session = SessionLocal()
     try:
         c = db.query(Company).filter(Company.id == company_id).first()
         if not c:
             raise HTTPException(status_code=404, detail="Company não encontrada")
-        if name: c.name = name
-        if slug: c.slug = slug.strip()
-        if review_mode is not None: c.review_mode = review_mode
+        
+        # Atualiza apenas os campos fornecidos
+        if name is not None:
+            c.name = name
+        if slug is not None:
+            c.slug = slug.strip()
+        if review_mode is not None:
+            c.review_mode = review_mode
+        if default_item_id is not None:
+            c.default_item_id = default_item_id
+        if ca_financial_account_id is not None:
+            c.ca_financial_account_id = ca_financial_account_id
+        
         db.add(c)
         db.commit()
         db.refresh(c)

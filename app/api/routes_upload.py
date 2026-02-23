@@ -25,6 +25,24 @@ def upload_sales(
         company = db.query(Company).filter(Company.id == company_id).first()
         if not company:
             raise HTTPException(status_code=404, detail="company_not_found")
+        
+        # ✅ VALIDAÇÃO: Bloqueia upload se configuração incompleta
+        if not company.default_item_id:
+            raise HTTPException(
+                status_code=400,
+                detail="config_incomplete: Configure o produto padrão em Configurações antes de enviar vendas"
+            )
+        
+        # Verifica se tem pelo menos 1 conta mapeada
+        payment_accounts = db.query(CompanyPaymentAccount).filter(
+            CompanyPaymentAccount.company_id == company_id
+        ).count()
+        
+        if payment_accounts == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="config_incomplete: Configure pelo menos uma conta de pagamento em Configurações antes de enviar vendas"
+            )
 
         suffix = os.path.splitext(file.filename or "")[1] or ".xlsx"
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
