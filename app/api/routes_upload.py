@@ -6,7 +6,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.db.models import Company, UploadBatch
+from app.db.models import Company, UploadBatch, CompanyPaymentAccount
 from app.services.import_xlsx import read_base_sheet
 from app.services.sales_builder import create_sales_from_records
 
@@ -25,23 +25,21 @@ def upload_sales(
         company = db.query(Company).filter(Company.id == company_id).first()
         if not company:
             raise HTTPException(status_code=404, detail="company_not_found")
-        
-        # ✅ VALIDAÇÃO: Bloqueia upload se configuração incompleta
+
+        # Validar configuração obrigatória
         if not company.default_item_id:
             raise HTTPException(
                 status_code=400,
-                detail="config_incomplete: Configure o produto padrão em Configurações antes de enviar vendas"
+                detail="config_incompleta: produto padrão não configurado. Acesse Configurações > Produto Padrão."
             )
-        
-        # Verifica se tem pelo menos 1 conta mapeada
+
         payment_accounts = db.query(CompanyPaymentAccount).filter(
             CompanyPaymentAccount.company_id == company_id
-        ).count()
-        
-        if payment_accounts == 0:
+        ).all()
+        if not payment_accounts:
             raise HTTPException(
                 status_code=400,
-                detail="config_incomplete: Configure pelo menos uma conta de pagamento em Configurações antes de enviar vendas"
+                detail="config_incompleta: nenhuma forma de pagamento mapeada. Acesse Configurações > Formas de Pagamento."
             )
 
         suffix = os.path.splitext(file.filename or "")[1] or ".xlsx"
@@ -49,11 +47,9 @@ def upload_sales(
             shutil.copyfileobj(file.file, tmp)
             temp_path = tmp.name
 
-        # ✅ aqui é onde geralmente quebra quando a planilha mudou
         try:
             records = read_base_sheet(temp_path, sheet_name="Base")
         except Exception as e:
-            # devolve erro LEGÍVEL pro cliente (nada de 500 genérico)
             raise HTTPException(
                 status_code=400,
                 detail=f"invalid_spreadsheet: {str(e)}"
