@@ -16,6 +16,7 @@ class Company(Base):
     token_expires_at = Column(DateTime, nullable=True)
     ca_financial_account_id = Column(String, nullable=True)
     default_item_id = Column(String, nullable=True)
+    access_pin = Column(String(64), nullable=True)  # hash SHA256 do PIN de acesso
     batches = relationship("UploadBatch", back_populates="company", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="company", cascade="all, delete-orphan")
     customers = relationship("CompanyCustomer", back_populates="company", cascade="all, delete-orphan")

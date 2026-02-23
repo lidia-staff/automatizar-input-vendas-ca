@@ -18,6 +18,7 @@ app.include_router(sales_router, prefix="/v1")
 app.include_router(companies_router, prefix="/v1")
 app.include_router(oauth_router)
 
+
 # DEBUG ENDPOINT
 @app.get("/debug/env")
 def debug_env():
@@ -74,6 +75,7 @@ def run_schema_migrations():
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMP;",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS review_mode BOOLEAN DEFAULT TRUE;",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS slug VARCHAR(100);",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS access_pin VARCHAR(64);",
         """CREATE UNIQUE INDEX IF NOT EXISTS uq_companies_slug ON companies(slug) WHERE slug IS NOT NULL;""",
         """CREATE TABLE IF NOT EXISTS company_payment_accounts (
             id SERIAL PRIMARY KEY,

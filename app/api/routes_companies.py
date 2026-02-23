@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import traceback
 import re
+import hashlib
 from typing import Optional
 
 from fastapi import APIRouter, Body, HTTPException
@@ -24,6 +25,11 @@ def _slugify(text: str) -> str:
     return text
 
 
+def _hash_pin(pin: str) -> str:
+    """Hash simples do PIN com SHA256."""
+    return hashlib.sha256(pin.strip().encode()).hexdigest()
+
+
 @router.post("/companies")
 def create_company(name: str = Body(..., embed=True), slug: Optional[str] = Body(None, embed=True)):
     db: Session = SessionLocal()
@@ -32,7 +38,6 @@ def create_company(name: str = Body(..., embed=True), slug: Optional[str] = Body
         if existing:
             return {"id": existing.id, "name": existing.name, "slug": existing.slug, "message": "Já existente"}
         final_slug = slug.strip() if slug else _slugify(name)
-        # garante slug único
         base = final_slug
         counter = 1
         while db.query(Company).filter(Company.slug == final_slug).first():
@@ -56,6 +61,7 @@ def list_companies():
                  "has_token": bool(c.refresh_token), "token_expires_at": c.token_expires_at,
                  "ca_financial_account_id": c.ca_financial_account_id,
                  "default_item_id": getattr(c, "default_item_id", None),
+                 "has_pin": bool(getattr(c, "access_pin", None)),
                  "review_mode": c.review_mode} for c in rows]
     finally:
         db.close()
@@ -69,11 +75,39 @@ def get_company_by_slug(slug: str):
         c = db.query(Company).filter(Company.slug == slug).first()
         if not c:
             raise HTTPException(status_code=404, detail=f"Empresa com slug '{slug}' não encontrada")
-        return {"id": c.id, "name": c.name, "slug": c.slug,
-                "has_token": bool(c.refresh_token), "token_expires_at": c.token_expires_at,
-                "ca_financial_account_id": c.ca_financial_account_id,
-                "default_item_id": getattr(c, "default_item_id", None),
-                "review_mode": c.review_mode}
+        return {
+            "id": c.id, "name": c.name, "slug": c.slug,
+            "has_token": bool(c.refresh_token), "token_expires_at": c.token_expires_at,
+            "ca_financial_account_id": c.ca_financial_account_id,
+            "default_item_id": getattr(c, "default_item_id", None),
+            "has_pin": bool(getattr(c, "access_pin", None)),
+            "review_mode": c.review_mode
+            # ⚠️ access_pin NUNCA é retornado aqui
+        }
+    finally:
+        db.close()
+
+
+@router.post("/companies/by-slug/{slug}/verify-pin")
+def verify_pin(slug: str, pin: str = Body(..., embed=True)):
+    """Verifica o PIN de acesso ao painel. Retorna apenas ok: true/false."""
+    db: Session = SessionLocal()
+    try:
+        c = db.query(Company).filter(Company.slug == slug).first()
+        if not c:
+            raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+        stored_pin = getattr(c, "access_pin", None)
+
+        # Se não tem PIN configurado, acesso liberado
+        if not stored_pin:
+            return {"ok": True}
+
+        # Compara hash do PIN informado com o hash armazenado
+        if _hash_pin(pin) == stored_pin:
+            return {"ok": True}
+
+        return {"ok": False}
     finally:
         db.close()
 
@@ -85,11 +119,14 @@ def get_company(company_id: int):
         c = db.query(Company).filter(Company.id == company_id).first()
         if not c:
             raise HTTPException(status_code=404, detail="Company não encontrada")
-        return {"id": c.id, "name": c.name, "slug": c.slug,
-                "has_token": bool(c.refresh_token), "token_expires_at": c.token_expires_at,
-                "ca_financial_account_id": c.ca_financial_account_id,
-                "default_item_id": getattr(c, "default_item_id", None),
-                "review_mode": c.review_mode}
+        return {
+            "id": c.id, "name": c.name, "slug": c.slug,
+            "has_token": bool(c.refresh_token), "token_expires_at": c.token_expires_at,
+            "ca_financial_account_id": c.ca_financial_account_id,
+            "default_item_id": getattr(c, "default_item_id", None),
+            "has_pin": bool(getattr(c, "access_pin", None)),
+            "review_mode": c.review_mode
+        }
     finally:
         db.close()
 
@@ -101,19 +138,17 @@ def update_company(
     slug: Optional[str] = Body(None, embed=True),
     review_mode: Optional[bool] = Body(None, embed=True),
     default_item_id: Optional[str] = Body(None, embed=True),
-    ca_financial_account_id: Optional[str] = Body(None, embed=True)
+    ca_financial_account_id: Optional[str] = Body(None, embed=True),
+    access_pin: Optional[str] = Body(None, embed=True),
 ):
-    """Atualiza dados da empresa (nome, slug, modo revisão, produto padrão, conta padrão)"""
     db: Session = SessionLocal()
     try:
         c = db.query(Company).filter(Company.id == company_id).first()
         if not c:
             raise HTTPException(status_code=404, detail="Company não encontrada")
-        
-        # Atualiza apenas os campos fornecidos
-        if name is not None:
+        if name:
             c.name = name
-        if slug is not None:
+        if slug:
             c.slug = slug.strip()
         if review_mode is not None:
             c.review_mode = review_mode
@@ -121,11 +156,13 @@ def update_company(
             c.default_item_id = default_item_id
         if ca_financial_account_id is not None:
             c.ca_financial_account_id = ca_financial_account_id
-        
+        if access_pin is not None:
+            # Salva o hash do PIN (nunca o PIN em texto claro)
+            c.access_pin = _hash_pin(access_pin) if access_pin.strip() else None
         db.add(c)
         db.commit()
         db.refresh(c)
-        return {"id": c.id, "name": c.name, "slug": c.slug}
+        return {"id": c.id, "name": c.name, "slug": c.slug, "has_pin": bool(c.access_pin)}
     finally:
         db.close()
 
@@ -176,37 +213,50 @@ def ca_set_financial_account(company_id: int, ca_financial_account_id: str = Bod
         c.ca_financial_account_id = ca_financial_account_id
         db.add(c)
         db.commit()
-        return {"ok": True, "company_id": company_id, "ca_financial_account_id": ca_financial_account_id}
+        return {"ok": True, "ca_financial_account_id": ca_financial_account_id}
     finally:
         db.close()
+
+
+@router.get("/companies/{company_id}/ca/products")
+def ca_list_products(company_id: int):
+    db: Session = SessionLocal()
+    try:
+        c = db.query(Company).filter(Company.id == company_id).first()
+        if not c:
+            raise HTTPException(status_code=404, detail="Company não encontrada")
+    finally:
+        db.close()
+    try:
+        client = ContaAzulClient(company_id=company_id)
+        return client.list_products()
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
 @router.get("/companies/{company_id}/payment-accounts")
 def list_payment_accounts(company_id: int):
     db: Session = SessionLocal()
     try:
-        c = db.query(Company).filter(Company.id == company_id).first()
-        if not c:
-            raise HTTPException(status_code=404, detail="Company não encontrada")
-        mappings = db.query(CompanyPaymentAccount).filter(
+        accounts = db.query(CompanyPaymentAccount).filter(
             CompanyPaymentAccount.company_id == company_id).all()
-        return {"company_id": company_id, "company_name": c.name,
-                "default_account": c.ca_financial_account_id,
-                "mappings": [{"id": m.id, "payment_method_key": m.payment_method_key,
-                              "ca_financial_account_id": m.ca_financial_account_id,
-                              "label": m.label} for m in mappings],
-                "valid_keys": VALID_PAYMENT_KEYS}
+        return [{"payment_method_key": a.payment_method_key,
+                 "ca_financial_account_id": a.ca_financial_account_id,
+                 "label": a.label} for a in accounts]
     finally:
         db.close()
 
 
 @router.post("/companies/{company_id}/payment-accounts")
-def set_payment_account(company_id: int, payment_method_key: str = Body(..., embed=True),
+def set_payment_account(company_id: int,
+                        payment_method_key: str = Body(..., embed=True),
                         ca_financial_account_id: str = Body(..., embed=True),
                         label: Optional[str] = Body(None, embed=True)):
     key = payment_method_key.strip().upper()
     if key not in VALID_PAYMENT_KEYS:
-        raise HTTPException(status_code=400, detail=f"Chave inválida: '{key}'. Válidas: {VALID_PAYMENT_KEYS}")
+        raise HTTPException(status_code=400, detail=f"Chave inválida. Válidas: {VALID_PAYMENT_KEYS}")
     db: Session = SessionLocal()
     try:
         c = db.query(Company).filter(Company.id == company_id).first()
@@ -244,22 +294,3 @@ def delete_payment_account(company_id: int, payment_method_key: str):
         return {"ok": True, "deleted": key}
     finally:
         db.close()
-
-
-@router.get("/companies/{company_id}/ca/products")
-def ca_list_products(company_id: int, busca: str = ""):
-    """Lista produtos/serviços do Conta Azul"""
-    db: Session = SessionLocal()
-    try:
-        c = db.query(Company).filter(Company.id == company_id).first()
-        if not c:
-            raise HTTPException(status_code=404, detail="Company não encontrada")
-    finally:
-        db.close()
-    try:
-        client = ContaAzulClient(company_id=company_id)
-        return client.list_products(busca=busca, pagina=1, tamanho_pagina=50)
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
