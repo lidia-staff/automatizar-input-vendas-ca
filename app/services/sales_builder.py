@@ -13,7 +13,7 @@ def _to_decimal(v) -> Decimal:
 
 
 def _build_group_key(row: dict) -> str:
-    # records já vêm com datas como date (import_xlsx converte)
+    """Chave de agrupamento padrão: agrupa vendas do mesmo cliente/data/pagamento/conta."""
     d = row["DATA ATENDIMENTO"].isoformat()
     venc = row["VENCIMENTO"].isoformat()
     cliente = str(row["CLIENTE / PACIENTE"]).strip()
@@ -21,6 +21,15 @@ def _build_group_key(row: dict) -> str:
     cond = str(row["CONDICAO DE PAGAMENTO"]).strip()
     conta = str(row["CONTA DE RECEBIMENTO"]).strip()
     return f"{d}|{cliente}|{forma}|{cond}|{conta}|{venc}"
+
+
+def _build_individual_key(row: dict, index: int) -> str:
+    """Chave única por linha: garante que cada linha vira uma venda separada."""
+    d = row["DATA ATENDIMENTO"].isoformat()
+    cliente = str(row["CLIENTE / PACIENTE"]).strip()
+    produto = str(row.get("PRODUTOS/SERVIÇOS") or "").strip()
+    valor = str(row.get("VALOR UNITARIO") or "").strip()
+    return f"individual|{index}|{d}|{cliente}|{produto}|{valor}"
 
 
 def _hash_unique(group_key: str, items_signature: str) -> str:
@@ -38,32 +47,40 @@ def create_sales_from_records(
     """
     Cria Sales + SaleItems a partir dos records importados da planilha.
 
-    Retorna:
-      (created, ready, awaiting, with_error, items_with_error)
+    Comportamento controlado pelo campo group_mode da empresa:
+      - "grouped"    → agrupa por cliente + data + pagamento + conta (padrão)
+      - "individual" → cada linha da planilha = uma venda separada
+
+    Retorna: (created, ready, awaiting, with_error, items_with_error)
     """
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise ValueError("company_not_found")
 
-    # Agrupa itens por chave de venda
+    mode = getattr(company, "group_mode", None) or "grouped"
+
+    # ── AGRUPAMENTO ───────────────────────────────────────────────
     grouped: dict[str, list[dict]] = {}
     item_errors_count = 0
 
-    for row in records:
+    for idx, row in enumerate(records):
         errs = validate_item(row)
         if errs:
             item_errors_count += 1
-            # ainda assim agrupa, mas essa venda provavelmente ficará ERRO
-        gk = _build_group_key(row)
+
+        if mode == "individual":
+            gk = _build_individual_key(row, idx)
+        else:
+            gk = _build_group_key(row)
+
         grouped.setdefault(gk, []).append(row)
 
+    # ── CRIAÇÃO DAS VENDAS ─────────────────────────────────────────
     created = ready = awaiting = with_error = 0
 
     for group_key, rows in grouped.items():
-        # monta assinatura dos itens (pra deduplicar)
         sig_parts = []
         total = Decimal("0")
-
         has_error = False
         error_msgs = []
 
@@ -77,7 +94,6 @@ def create_sales_from_records(
             unit = _to_decimal(r.get("VALOR UNITARIO"))
             line_total = (qty * unit).quantize(Decimal("0.01"))
             total += line_total
-
             sig_parts.append(f"{r.get('PRODUTOS/SERVIÇOS')}|{qty}|{unit}")
 
         items_signature = "||".join(sig_parts)
@@ -131,12 +147,10 @@ def create_sales_from_records(
         db.commit()
         db.refresh(sale)
 
-        # cria itens
         for r in rows:
             qty = _to_decimal(r.get("QUANTIDADE"))
             unit = _to_decimal(r.get("VALOR UNITARIO"))
             line_total = (qty * unit).quantize(Decimal("0.01"))
-
             item = SaleItem(
                 sale_id=sale.id,
                 category=(r.get("CATEGORIA") or None),
@@ -149,7 +163,6 @@ def create_sales_from_records(
             db.add(item)
 
         db.commit()
-
         created += 1
 
     return created, ready, awaiting, with_error, item_errors_count

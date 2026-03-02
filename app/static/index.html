@@ -118,55 +118,9 @@
   .empty-state { text-align: center; padding: 48px; color: var(--muted); }
   .empty-state-icon { font-size: 36px; margin-bottom: 12px; }
   .section-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-
-  /* PIN OVERLAY */
-  #pinOverlay {
-    display: none;
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.88);
-    z-index: 9999;
-    align-items: center;
-    justify-content: center;
-  }
-  #pinOverlay.open { display: flex; }
-  .pin-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 40px 32px;
-    width: 340px;
-    text-align: center;
-  }
-  #pinInput {
-    text-align: center;
-    font-size: 22px;
-    letter-spacing: 8px;
-    padding: 12px;
-  }
 </style>
 </head>
 <body>
-
-<!-- PIN OVERLAY -->
-<div id="pinOverlay">
-  <div class="pin-box">
-    <div style="font-size:40px;margin-bottom:12px">🔒</div>
-    <h2 id="pinCompanyName" style="font-size:18px;font-weight:600;margin-bottom:6px"></h2>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:24px">Digite o PIN de acesso para continuar</p>
-    <div class="form-group">
-      <input
-        id="pinInput"
-        type="password"
-        inputmode="numeric"
-        maxlength="20"
-        placeholder="••••"
-        onkeydown="if(event.key==='Enter') verifyPin()"
-      >
-    </div>
-    <div id="pinError" style="color:var(--danger);font-size:12px;margin-bottom:12px;min-height:16px"></div>
-    <button onclick="verifyPin()" class="btn btn-primary" style="width:100%">Entrar</button>
-  </div>
-</div>
 
 <div class="app">
   <!-- SIDEBAR -->
@@ -176,16 +130,16 @@
       <p>Vendas → Conta Azul</p>
     </div>
     <nav class="nav">
-      <div class="nav-item active" onclick="showPage('dashboard', event)">
+      <div class="nav-item active" onclick="showPage('dashboard')">
         <span class="nav-icon">📊</span> Dashboard
       </div>
-      <div class="nav-item" onclick="showPage('upload', event)">
+      <div class="nav-item" onclick="showPage('upload')">
         <span class="nav-icon">📤</span> Upload
       </div>
-      <div class="nav-item" onclick="showPage('batches', event)">
+      <div class="nav-item" onclick="showPage('batches')">
         <span class="nav-icon">📦</span> Lotes
       </div>
-      <div class="nav-item" onclick="showPage('config', event)">
+      <div class="nav-item" onclick="showPage('config')">
         <span class="nav-icon">⚙️</span> Configurações
       </div>
     </nav>
@@ -319,7 +273,7 @@
         <button class="btn btn-primary btn-sm" onclick="saveDefaultAccount()">Salvar Conta Padrão</button>
       </div>
 
-      <!-- Produto Padrão -->
+      <!-- Produto Padrão (NOVO) -->
       <div class="card">
         <div class="card-title">⚠️ Produto/Serviço Padrão <span style="color:var(--danger);font-size:11px">(OBRIGATÓRIO)</span></div>
         <p style="color:var(--muted);font-size:12px;margin-bottom:14px">Todas as vendas serão registradas com este produto. Configure antes de enviar vendas.</p>
@@ -344,12 +298,28 @@
         <button class="btn btn-primary btn-sm" onclick="saveDefaultProduct()">✅ Salvar Produto Padrão</button>
       </div>
 
+      <!-- Modo de Agrupamento -->
+      <div class="card">
+        <div class="card-title">📦 Modo de Agrupamento de Vendas</div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:14px">
+          Define como as linhas da planilha são convertidas em vendas no sistema.
+        </p>
+        <div class="form-group">
+          <label>Modo</label>
+          <select id="groupModeSelect">
+            <option value="grouped">Agrupar por cliente + data + pagamento (padrão)</option>
+            <option value="individual">Uma venda por linha (sem agrupamento)</option>
+          </select>
+          <p style="color:var(--muted);font-size:11px;margin-top:6px" id="groupModeDesc"></p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveGroupMode()">Salvar Modo</button>
+      </div>
+
       <!-- PIN de Acesso -->
       <div class="card">
-        <div class="card-title">🔒 PIN de Acesso</div>
+        <div class="card-title" id="pinCardTitle">🔒 PIN de Acesso</div>
         <p style="color:var(--muted);font-size:12px;margin-bottom:14px">
-          Proteja o painel deste cliente com um PIN numérico. O cliente precisará digitar o PIN ao acessar o painel.
-          Deixe em branco para remover o PIN atual.
+          Proteja o painel deste cliente com um PIN numérico. Deixe em branco para remover o PIN atual.
         </p>
         <div class="form-group">
           <label>Novo PIN (mínimo 4 dígitos)</label>
@@ -413,7 +383,6 @@ const API = '';  // vazio = mesma origem
 // ─── STATE ────────────────────────────────────────────────────────
 let currentCompanyId = null;
 let caAccounts = [];
-let _pendingSlug = null;
 
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -422,116 +391,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ─── NAVIGATION ───────────────────────────────────────────────────
-function showPage(page, event) {
+function showPage(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + page).classList.add('active');
-  if (event && event.currentTarget) event.currentTarget.classList.add('active');
+  event.currentTarget.classList.add('active');
   
   if (page === 'dashboard') loadDashboard();
   if (page === 'batches') loadBatches();
-  if (page === 'config') { loadCAAccounts(); loadPaymentMappings(); loadDefaultAccount(); loadPinStatus(); }
-}
-
-// ─── PIN DE ACESSO ─────────────────────────────────────────────────
-async function checkPinRequired(slug, companyName) {
-  // Verifica se já autenticou nesta sessão
-  const sessionKey = `pin_ok_${slug}`;
-  if (sessionStorage.getItem(sessionKey) === 'true') return true;
-
-  // Consulta se tem PIN configurado
-  try {
-    const res = await fetch(`${API}/v1/companies/by-slug/${slug}`);
-    const data = await res.json();
-    if (!data.has_pin) return true; // sem PIN, libera direto
-  } catch(e) {
-    return true; // em caso de erro, não bloqueia
-  }
-
-  // Tem PIN — exibe modal
-  _pendingSlug = slug;
-  document.getElementById('pinCompanyName').textContent = companyName || slug;
-  document.getElementById('pinInput').value = '';
-  document.getElementById('pinError').textContent = '';
-  document.getElementById('pinOverlay').classList.add('open');
-  setTimeout(() => document.getElementById('pinInput').focus(), 100);
-  return false;
-}
-
-async function verifyPin() {
-  const pin = document.getElementById('pinInput').value.trim();
-  if (!pin) {
-    document.getElementById('pinError').textContent = 'Digite o PIN para continuar.';
-    return;
-  }
-
-  try {
-    const res = await fetch(`${API}/v1/companies/by-slug/${_pendingSlug}/verify-pin`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin })
-    });
-    const data = await res.json();
-
-    if (data.ok) {
-      sessionStorage.setItem(`pin_ok_${_pendingSlug}`, 'true');
-      document.getElementById('pinOverlay').classList.remove('open');
-      loadDashboard();
-    } else {
-      document.getElementById('pinError').textContent = 'PIN incorreto. Tente novamente.';
-      document.getElementById('pinInput').value = '';
-      document.getElementById('pinInput').focus();
-    }
-  } catch(e) {
-    document.getElementById('pinError').textContent = 'Erro ao verificar PIN. Tente novamente.';
-  }
-}
-
-async function savePin() {
-  const pin = document.getElementById('pinNewInput').value.trim();
-  if (!pin) return toast('Digite um PIN para salvar', 'error');
-  if (pin.length < 4) return toast('PIN deve ter no mínimo 4 caracteres', 'error');
-  try {
-    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_pin: pin })
-    });
-    if (!res.ok) throw new Error('Erro ao salvar');
-    toast('🔒 PIN definido com sucesso!', 'success');
-    document.getElementById('pinNewInput').value = '';
-    loadPinStatus();
-  } catch(e) {
-    toast('Erro ao salvar PIN', 'error');
-  }
-}
-
-async function removePin() {
-  if (!confirm('Remover o PIN de acesso? O painel ficará público.')) return;
-  try {
-    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ access_pin: '' })
-    });
-    if (!res.ok) throw new Error('Erro ao remover');
-    toast('🔓 PIN removido. Painel agora público.', 'success');
-    loadPinStatus();
-  } catch(e) {
-    toast('Erro ao remover PIN', 'error');
-  }
-}
-
-async function loadPinStatus() {
-  if (!currentCompanyId) return;
-  try {
-    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`);
-    const data = await res.json();
-    const card = document.querySelector('#page-config .card:nth-of-type(5) .card-title');
-    if (card) {
-      card.textContent = data.has_pin ? '🔒 PIN de Acesso (ativo)' : '🔓 PIN de Acesso (sem PIN)';
-    }
-  } catch(e) {}
+  if (page === 'config') { loadCAAccounts(); loadPaymentMappings(); loadDefaultAccount(); loadGroupMode(); loadPinStatus(); }
 }
 
 // ─── COMPANY ──────────────────────────────────────────────────────
@@ -564,22 +432,15 @@ async function loadCompanies() {
       sel.value = String(companies[0].id);
       currentCompanyId = String(companies[0].id);
     }
-
-    // Se veio por slug: esconde dropdown, mostra nome fixo e verifica PIN
+    // Se veio por slug: esconde dropdown e mostra nome fixo
     if (pathSlug && matched) {
       const company = companies.find(c => String(c.id) === String(currentCompanyId));
       document.getElementById('companySelect').style.display = 'none';
       const fixed = document.getElementById('companyFixed');
       fixed.style.display = 'block';
       fixed.textContent = company ? company.name : '';
-
-      // Verificar PIN antes de carregar dashboard
-      const pinOk = await checkPinRequired(pathSlug, company ? company.name : '');
-      if (pinOk) loadDashboard();
-      // Se pinOk = false: modal foi aberto, verifyPin() chamará loadDashboard()
-    } else {
-      loadDashboard();
     }
+    loadDashboard();
   } catch(e) {
     toast('Erro ao carregar empresas', 'error');
   }
@@ -698,14 +559,15 @@ async function doUpload() {
     const data = await res.json();
 
     if (!res.ok) {
-      if (data.detail && data.detail.includes('config_incompleta')) {
-        const msg = data.detail.replace('config_incompleta: ', '');
+      // Tratamento especial para config incompleta
+      if (data.detail && data.detail.includes('config_incomplete')) {
+        const msg = data.detail.replace('config_incomplete: ', '');
         document.getElementById('upload-result').style.display = 'block';
         document.getElementById('upload-result').innerHTML = `
           <div class="error-detail">
             <strong>⚠️ Configuração Incompleta</strong><br>
             ${msg}<br><br>
-            <button class="btn btn-primary btn-sm" onclick="showPage('config', null)">Ir para Configurações</button>
+            <button class="btn btn-primary btn-sm" onclick="showPage('config')">Ir para Configurações</button>
           </div>`;
         throw new Error(msg);
       }
@@ -725,7 +587,7 @@ async function doUpload() {
         ${data.awaiting_approval > 0 ? `
         <div style="margin-top:14px;display:flex;gap:8px">
           <button class="btn btn-primary btn-sm" onclick="quickApprove(${data.batch_id})">✓ Aprovar Lote #${data.batch_id}</button>
-          <button class="btn btn-secondary btn-sm" onclick="showPage('batches', null);loadBatches()">Ver Lotes</button>
+          <button class="btn btn-secondary btn-sm" onclick="showPage('batches');loadBatches()">Ver Lotes</button>
         </div>` : ''}
       </div>`;
 
@@ -769,6 +631,7 @@ async function loadBatches() {
       return;
     }
 
+    // Agrupa por batch
     const batches = {};
     sales.forEach(s => {
       if (!batches[s.batch_id]) batches[s.batch_id] = { id: s.batch_id, sales: [] };
@@ -863,14 +726,17 @@ async function loadCAAccounts() {
     const data = await res.json();
     const allAccounts = data.itens || data || [];
     
+    // ✅ FILTRAR APENAS ATIVAS
     caAccounts = allAccounts.filter(a => a.ativo === true || a.active === true);
 
+    // Atualiza select do modal (já filtrado)
     const sel = document.getElementById('mappingAccount');
     sel.innerHTML = '<option value="">Selecione...</option>' +
       caAccounts.map(a =>
         `<option value="${a.id}">${a.nome} (${a.tipo})</option>`
       ).join('');
 
+    // Mostra apenas contas ativas na lista
     el.innerHTML = `
       <table>
         <tr><th>Nome</th><th>Tipo</th><th>UUID</th></tr>
@@ -948,7 +814,7 @@ async function saveDefaultAccount() {
   }
 }
 
-// ─── PRODUTOS ─────────────────────────────────────────────────────
+// ===== PRODUTOS (NOVO) =====
 async function loadCAProducts() {
   if (!currentCompanyId) return;
   const el = document.getElementById('products-list');
@@ -961,9 +827,10 @@ async function loadCAProducts() {
     const data = await res.json();
     const allProducts = data.items || data.itens || [];
     
+    // ✅ FILTRAR APENAS ATIVOS
     const products = allProducts.filter(p => 
       p.status === 'ATIVO' || p.ativo === true || p.active === true || 
-      (!p.status && !p.hasOwnProperty('ativo'))
+      (!p.status && !p.hasOwnProperty('ativo'))  // Se não tem status, assume ativo
     );
     
     if (products.length === 0) {
@@ -971,12 +838,14 @@ async function loadCAProducts() {
       return;
     }
     
+    // Atualiza select
     const sel = document.getElementById('defaultProductSelect');
     sel.innerHTML = '<option value="">-- Selecione um produto --</option>' +
       products.map(p => 
         `<option value="${p.id}">${p.name || p.description || p.nome} ${p.code ? '(' + p.code + ')' : ''}</option>`
       ).join('');
     
+    // Mostra lista
     el.innerHTML = `
       <table>
         <tr><th>Nome/Descrição</th><th>Código</th><th>UUID</th></tr>
@@ -995,6 +864,7 @@ async function loadCAProducts() {
 }
 
 function onProductSelectChange() {
+  // Limpa input manual quando seleciona do dropdown
   const sel = document.getElementById('defaultProductSelect');
   if (sel.value) {
     document.getElementById('manualProductInput').value = '';
@@ -1002,11 +872,15 @@ function onProductSelectChange() {
 }
 
 async function saveDefaultProduct() {
+  // Aceita UUID do select OU do input manual
   const selectedId = document.getElementById('defaultProductSelect').value;
   const manualId = document.getElementById('manualProductInput').value.trim();
+  
   const productId = selectedId || manualId;
   
-  if (!productId) return toast('Selecione um produto ou cole o UUID manualmente', 'error');
+  if (!productId) {
+    return toast('Selecione um produto ou cole o UUID manualmente', 'error');
+  }
   
   try {
     const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
@@ -1014,18 +888,20 @@ async function saveDefaultProduct() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ default_item_id: productId })
     });
+    
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.detail || 'Erro ao salvar');
     }
+    
     toast('✅ Produto padrão configurado!', 'success');
     loadDashboard();
   } catch(e) {
     toast(e.message, 'error');
   }
 }
+// ===== FIM PRODUTOS =====
 
-// ─── MAPEAMENTO ───────────────────────────────────────────────────
 function openMappingModal() {
   document.getElementById('mappingModal').classList.add('open');
 }
@@ -1073,6 +949,96 @@ async function deleteMapping(key) {
 function doOAuth() {
   if (!currentCompanyId) return toast('Selecione uma empresa', 'error');
   window.open(`/api/contaazul/start?company_id=${currentCompanyId}`, '_blank');
+}
+
+// ─── GROUP MODE ───────────────────────────────────────────────────
+async function loadGroupMode() {
+  if (!currentCompanyId) return;
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`);
+    const data = await res.json();
+    const mode = data.group_mode || 'grouped';
+    document.getElementById('groupModeSelect').value = mode;
+    updateGroupModeDesc(mode);
+  } catch(e) {}
+}
+
+function updateGroupModeDesc(mode) {
+  const desc = document.getElementById('groupModeDesc');
+  if (mode === 'individual') {
+    desc.textContent = 'Cada linha da planilha será importada como uma venda separada.';
+    desc.style.color = 'var(--warn)';
+  } else {
+    desc.textContent = 'Linhas com mesmo cliente, data e pagamento serão agrupadas em uma única venda.';
+    desc.style.color = 'var(--muted)';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('groupModeSelect');
+  if (sel) sel.addEventListener('change', () => updateGroupModeDesc(sel.value));
+});
+
+async function saveGroupMode() {
+  const mode = document.getElementById('groupModeSelect').value;
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_mode: mode })
+    });
+    if (!res.ok) throw new Error('Erro ao salvar');
+    const label = mode === 'individual' ? 'Uma venda por linha' : 'Agrupamento padrão';
+    toast(`✅ Modo salvo: ${label}`, 'success');
+  } catch(e) {
+    toast('Erro ao salvar modo de agrupamento', 'error');
+  }
+}
+
+// ─── PIN ──────────────────────────────────────────────────────────
+async function loadPinStatus() {
+  if (!currentCompanyId) return;
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`);
+    const data = await res.json();
+    const title = document.getElementById('pinCardTitle');
+    if (title) title.textContent = data.has_pin ? '🔒 PIN de Acesso (ativo)' : '🔓 PIN de Acesso (sem PIN)';
+  } catch(e) {}
+}
+
+async function savePin() {
+  const pin = document.getElementById('pinNewInput').value.trim();
+  if (!pin) return toast('Digite um PIN para salvar', 'error');
+  if (pin.length < 4) return toast('PIN deve ter no mínimo 4 caracteres', 'error');
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_pin: pin })
+    });
+    if (!res.ok) throw new Error('Erro ao salvar');
+    toast('🔒 PIN definido com sucesso!', 'success');
+    document.getElementById('pinNewInput').value = '';
+    loadPinStatus();
+  } catch(e) {
+    toast('Erro ao salvar PIN', 'error');
+  }
+}
+
+async function removePin() {
+  if (!confirm('Remover o PIN de acesso? O painel ficará público.')) return;
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_pin: '' })
+    });
+    if (!res.ok) throw new Error('Erro ao remover');
+    toast('🔓 PIN removido.', 'success');
+    loadPinStatus();
+  } catch(e) {
+    toast('Erro ao remover PIN', 'error');
+  }
 }
 
 // ─── TOAST ────────────────────────────────────────────────────────

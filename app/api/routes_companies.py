@@ -62,7 +62,8 @@ def list_companies():
                  "ca_financial_account_id": c.ca_financial_account_id,
                  "default_item_id": getattr(c, "default_item_id", None),
                  "has_pin": bool(getattr(c, "access_pin", None)),
-                 "review_mode": c.review_mode} for c in rows]
+                 "review_mode": c.review_mode,
+                 "group_mode": getattr(c, "group_mode", "grouped") or "grouped"} for c in rows]
     finally:
         db.close()
 
@@ -81,7 +82,8 @@ def get_company_by_slug(slug: str):
             "ca_financial_account_id": c.ca_financial_account_id,
             "default_item_id": getattr(c, "default_item_id", None),
             "has_pin": bool(getattr(c, "access_pin", None)),
-            "review_mode": c.review_mode
+            "review_mode": c.review_mode,
+            "group_mode": getattr(c, "group_mode", "grouped") or "grouped",
             # ⚠️ access_pin NUNCA é retornado aqui
         }
     finally:
@@ -125,7 +127,8 @@ def get_company(company_id: int):
             "ca_financial_account_id": c.ca_financial_account_id,
             "default_item_id": getattr(c, "default_item_id", None),
             "has_pin": bool(getattr(c, "access_pin", None)),
-            "review_mode": c.review_mode
+            "review_mode": c.review_mode,
+            "group_mode": getattr(c, "group_mode", "grouped") or "grouped",
         }
     finally:
         db.close()
@@ -140,6 +143,7 @@ def update_company(
     default_item_id: Optional[str] = Body(None, embed=True),
     ca_financial_account_id: Optional[str] = Body(None, embed=True),
     access_pin: Optional[str] = Body(None, embed=True),
+    group_mode: Optional[str] = Body(None, embed=True),
 ):
     db: Session = SessionLocal()
     try:
@@ -157,12 +161,20 @@ def update_company(
         if ca_financial_account_id is not None:
             c.ca_financial_account_id = ca_financial_account_id
         if access_pin is not None:
-            # Salva o hash do PIN (nunca o PIN em texto claro)
             c.access_pin = _hash_pin(access_pin) if access_pin.strip() else None
+        if group_mode is not None:
+            valid_modes = ["grouped", "individual"]
+            if group_mode not in valid_modes:
+                raise HTTPException(status_code=400, detail=f"group_mode inválido. Válidos: {valid_modes}")
+            c.group_mode = group_mode
         db.add(c)
         db.commit()
         db.refresh(c)
-        return {"id": c.id, "name": c.name, "slug": c.slug, "has_pin": bool(c.access_pin)}
+        return {
+            "id": c.id, "name": c.name, "slug": c.slug,
+            "has_pin": bool(c.access_pin),
+            "group_mode": c.group_mode or "grouped",
+        }
     finally:
         db.close()
 

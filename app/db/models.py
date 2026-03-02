@@ -9,14 +9,17 @@ class Company(Base):
     __tablename__ = "companies"
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False)
-    slug = Column(String(100), nullable=True, unique=True)  # ex: body-face
+    slug = Column(String(100), nullable=True, unique=True)
     review_mode = Column(Boolean, default=True)
     access_token = Column(Text, nullable=True)
     refresh_token = Column(Text, nullable=True)
     token_expires_at = Column(DateTime, nullable=True)
     ca_financial_account_id = Column(String, nullable=True)
     default_item_id = Column(String, nullable=True)
-    access_pin = Column(String(64), nullable=True)  # hash SHA256 do PIN de acesso
+    access_pin = Column(String(64), nullable=True)
+    group_mode = Column(String(20), nullable=True, default="grouped")
+    # grouped    → agrupa por cliente + data + pagamento + conta (padrão)
+    # individual → cada linha da planilha = uma venda separada
     batches = relationship("UploadBatch", back_populates="company", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="company", cascade="all, delete-orphan")
     customers = relationship("CompanyCustomer", back_populates="company", cascade="all, delete-orphan")

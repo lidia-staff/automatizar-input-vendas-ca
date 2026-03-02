@@ -19,10 +19,8 @@ app.include_router(companies_router, prefix="/v1")
 app.include_router(oauth_router)
 
 
-# DEBUG ENDPOINT
 @app.get("/debug/env")
 def debug_env():
-    """Endpoint temporário para verificar variáveis de ambiente"""
     return {
         "CA_CLIENT_ID": "OK" if os.getenv("CA_CLIENT_ID") else "MISSING",
         "CA_CLIENT_SECRET": "OK" if os.getenv("CA_CLIENT_SECRET") else "MISSING",
@@ -45,7 +43,6 @@ def painel():
 
 @app.get("/painel/{slug}", response_class=HTMLResponse)
 def painel_slug(slug: str):
-    """Painel filtrado por slug da empresa. Ex: /painel/body-face"""
     return HTMLResponse(content=_load_html())
 
 
@@ -76,6 +73,7 @@ def run_schema_migrations():
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS review_mode BOOLEAN DEFAULT TRUE;",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS slug VARCHAR(100);",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS access_pin VARCHAR(64);",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS group_mode VARCHAR(20) DEFAULT 'grouped';",
         """CREATE UNIQUE INDEX IF NOT EXISTS uq_companies_slug ON companies(slug) WHERE slug IS NOT NULL;""",
         """CREATE TABLE IF NOT EXISTS company_payment_accounts (
             id SERIAL PRIMARY KEY,
