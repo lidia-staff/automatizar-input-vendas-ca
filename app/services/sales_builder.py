@@ -12,6 +12,24 @@ def _to_decimal(v) -> Decimal:
     return Decimal(str(v).replace(",", "."))
 
 
+def _to_decimal_or_none(v):
+    """Retorna Decimal se valor informado, None se vazio."""
+    if v is None or str(v).strip() == "":
+        return None
+    try:
+        return Decimal(str(v).replace(",", "."))
+    except Exception:
+        return None
+
+
+def _to_str_or_none(v):
+    """Retorna string limpa se informada, None se vazia."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s else None
+
+
 def _build_group_key(row: dict) -> str:
     """Chave de agrupamento padrão: agrupa vendas do mesmo cliente/data/pagamento/conta."""
     d = row["DATA ATENDIMENTO"].isoformat()
@@ -47,9 +65,14 @@ def create_sales_from_records(
     """
     Cria Sales + SaleItems a partir dos records importados da planilha.
 
-    Comportamento controlado pelo campo group_mode da empresa:
+    Campos opcionais lidos da planilha (se coluna existir e estiver preenchida):
+      - NUMERO_VENDA  → sale.sale_number   (senão usa get_next_sale_number() no envio ao CA)
+      - DESCONTO      → sale.discount_amount em R$ (senão não envia desconto ao CA)
+      - CENTRO_CUSTO  → sale.cost_center_id UUID do CA (senão não envia centro de custo)
+
+    group_mode da empresa:
       - "grouped"    → agrupa por cliente + data + pagamento + conta (padrão)
-      - "individual" → cada linha da planilha = uma venda separada
+      - "individual" → cada linha = uma venda separada
 
     Retorna: (created, ready, awaiting, with_error, items_with_error)
     """
@@ -108,12 +131,19 @@ def create_sales_from_records(
         if exists:
             continue
 
-        sale_date = rows[0]["DATA ATENDIMENTO"]
-        due_date = rows[0]["VENCIMENTO"]
-        customer_name = rows[0]["CLIENTE / PACIENTE"]
-        payment_method = rows[0]["FORMA DE PAGAMENTO"]
-        payment_terms = rows[0]["CONDICAO DE PAGAMENTO"]
-        receiving_account = rows[0]["CONTA DE RECEBIMENTO"]
+        # Campos base (primeira linha do grupo)
+        first = rows[0]
+        sale_date = first["DATA ATENDIMENTO"]
+        due_date = first["VENCIMENTO"]
+        customer_name = first["CLIENTE / PACIENTE"]
+        payment_method = first["FORMA DE PAGAMENTO"]
+        payment_terms = first["CONDICAO DE PAGAMENTO"]
+        receiving_account = first["CONTA DE RECEBIMENTO"]
+
+        # Campos opcionais — lidos se coluna existir e estiver preenchida
+        sale_number = _to_str_or_none(first.get("NUMERO_VENDA"))
+        discount_amount = _to_decimal_or_none(first.get("DESCONTO"))
+        cost_center_id = _to_str_or_none(first.get("CENTRO_CUSTO"))
 
         if has_error:
             status = "ERRO"
@@ -142,6 +172,9 @@ def create_sales_from_records(
             total_amount=total,
             status=status,
             error_summary=error_summary,
+            sale_number=sale_number,
+            discount_amount=discount_amount,
+            cost_center_id=cost_center_id,
         )
         db.add(sale)
         db.commit()

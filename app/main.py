@@ -65,6 +65,7 @@ def health():
 
 def run_schema_migrations():
     stmts = [
+        # Companies
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS default_item_id VARCHAR;",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS ca_financial_account_id VARCHAR;",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS access_token TEXT;",
@@ -74,7 +75,14 @@ def run_schema_migrations():
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS slug VARCHAR(100);",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS access_pin VARCHAR(64);",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS group_mode VARCHAR(20) DEFAULT 'grouped';",
-        """CREATE UNIQUE INDEX IF NOT EXISTS uq_companies_slug ON companies(slug) WHERE slug IS NOT NULL;""",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS ca_sale_status VARCHAR(30) DEFAULT 'EM_ANDAMENTO';",
+        # Sales
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS sale_number VARCHAR(50);",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2);",
+        "ALTER TABLE sales ADD COLUMN IF NOT EXISTS cost_center_id VARCHAR(80);",
+        # Índices
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_companies_slug ON companies(slug) WHERE slug IS NOT NULL;",
+        # Tabelas auxiliares
         """CREATE TABLE IF NOT EXISTS company_payment_accounts (
             id SERIAL PRIMARY KEY,
             company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -85,6 +93,17 @@ def run_schema_migrations():
             updated_at TIMESTAMP DEFAULT NOW(),
             CONSTRAINT uq_company_payment_method UNIQUE (company_id, payment_method_key)
         );""",
+        """CREATE TABLE IF NOT EXISTS company_products (
+            id SERIAL PRIMARY KEY,
+            company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            product_key VARCHAR(250) NOT NULL,
+            product_name VARCHAR(200),
+            ca_product_id VARCHAR(80) NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT uq_company_product_key UNIQUE (company_id, product_key)
+        );""",
+        "CREATE INDEX IF NOT EXISTS ix_company_products_company_key ON company_products(company_id, product_key);",
     ]
     with engine.begin() as conn:
         for s in stmts:

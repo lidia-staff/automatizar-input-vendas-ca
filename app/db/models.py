@@ -18,11 +18,12 @@ class Company(Base):
     default_item_id = Column(String, nullable=True)
     access_pin = Column(String(64), nullable=True)
     group_mode = Column(String(20), nullable=True, default="grouped")
-    # grouped    → agrupa por cliente + data + pagamento + conta (padrão)
-    # individual → cada linha da planilha = uma venda separada
+    ca_sale_status = Column(String(30), nullable=True, default="EM_ANDAMENTO")
+    # ca_sale_status: EM_ANDAMENTO | APROVADO | CONCLUIDO
     batches = relationship("UploadBatch", back_populates="company", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="company", cascade="all, delete-orphan")
     customers = relationship("CompanyCustomer", back_populates="company", cascade="all, delete-orphan")
+    products = relationship("CompanyProduct", back_populates="company", cascade="all, delete-orphan")
     payment_accounts = relationship("CompanyPaymentAccount", back_populates="company", cascade="all, delete-orphan")
 
 
@@ -39,6 +40,23 @@ class CompanyPaymentAccount(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     company = relationship("Company", back_populates="payment_accounts")
+
+
+class CompanyProduct(Base):
+    """Cache de produtos/serviços do CA por empresa."""
+    __tablename__ = "company_products"
+    __table_args__ = (
+        UniqueConstraint("company_id", "product_key", name="uq_company_product_key"),
+        Index("ix_company_products_company_key", "company_id", "product_key"),
+    )
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    product_key = Column(String(250), nullable=False)   # nome normalizado
+    product_name = Column(String(200), nullable=True)   # nome original
+    ca_product_id = Column(String(80), nullable=False)  # UUID no CA
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    company = relationship("Company", back_populates="products")
 
 
 class UploadBatch(Base):
@@ -69,6 +87,9 @@ class Sale(Base):
     status = Column(String(40), nullable=False)
     error_summary = Column(Text, nullable=True)
     ca_sale_id = Column(String(80), nullable=True)
+    sale_number = Column(String(50), nullable=True)
+    discount_amount = Column(Numeric(12, 2), nullable=True)
+    cost_center_id = Column(String(80), nullable=True)
     company = relationship("Company", back_populates="sales")
     batch = relationship("UploadBatch", back_populates="sales")
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")

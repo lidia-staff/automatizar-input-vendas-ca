@@ -315,6 +315,23 @@
         <button class="btn btn-primary btn-sm" onclick="saveGroupMode()">Salvar Modo</button>
       </div>
 
+
+      <!-- Status da Venda no CA -->
+      <div class="card">
+        <div class="card-title">📋 Status da Venda ao Criar no CA</div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:14px">
+          Define a situação das vendas no momento em que são criadas no Conta Azul.
+        </p>
+        <div class="form-group">
+          <label>Situação</label>
+          <select id="caSaleStatusSelect">
+            <option value="EM_ANDAMENTO">Em andamento (padrão)</option>
+            <option value="APROVADO">Aprovado</option>
+            <option value="CONCLUIDO">Concluído</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveCaSaleStatus()">Salvar Status</button>
+      </div>
       <!-- PIN de Acesso -->
       <div class="card">
         <div class="card-title" id="pinCardTitle">🔒 PIN de Acesso</div>
@@ -488,7 +505,7 @@ async function loadDashboard() {
       </div>`;
     
     // Mapeamentos
-    const maps = mapping.mappings || [];
+    const maps = Array.isArray(mapping) ? mapping : (mapping.mappings || []);
     if (maps.length === 0) {
       document.getElementById('payment-mapping-summary').innerHTML =
         '<p style="color:var(--warn);font-size:13px">⚠️ Nenhum mapeamento configurado. Configure em Configurações.</p>';
@@ -976,6 +993,9 @@ async function loadGroupMode() {
     const res = await fetch(`${API}/v1/companies/${currentCompanyId}`);
     const data = await res.json();
     const mode = data.group_mode || 'grouped';
+    const saleStatus = data.ca_sale_status || 'EM_ANDAMENTO';
+    const statusSel = document.getElementById('caSaleStatusSelect');
+    if (statusSel) statusSel.value = saleStatus;
     document.getElementById('groupModeSelect').value = mode;
     updateGroupModeDesc(mode);
   } catch(e) {}
@@ -996,6 +1016,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const sel = document.getElementById('groupModeSelect');
   if (sel) sel.addEventListener('change', () => updateGroupModeDesc(sel.value));
 });
+
+async function saveCaSaleStatus() {
+  const status = document.getElementById('caSaleStatusSelect').value;
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ca_sale_status: status })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const labels = { EM_ANDAMENTO: 'Em andamento', APROVADO: 'Aprovado', CONCLUIDO: 'Concluído' };
+    toast(`✅ Status salvo: ${labels[status] || status}`, 'success');
+  } catch(e) {
+    toast(`Erro ao salvar status: ${e.message}`, 'error');
+  }
+}
 
 async function saveGroupMode() {
   const mode = document.getElementById('groupModeSelect').value;

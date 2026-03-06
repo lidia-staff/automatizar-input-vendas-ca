@@ -5,6 +5,7 @@ from app.db.session import SessionLocal
 from app.db.models import Sale, SaleItem, Company, CompanyPaymentAccount
 from app.services.conta_azul_client import ContaAzulClient
 from app.services.contaazul_people import get_or_create_customer_uuid_cached
+from app.services.contaazul_products import get_or_create_product_uuid_cached
 from app.services.ca_sale_builder import build_ca_sale_payload
 from app.services.ca_payload_builder import _normalize_payment_method
 
@@ -14,13 +15,8 @@ router = APIRouter(tags=["sales"])
 def _get_financial_account_id(db: Session, company: Company, payment_method: str) -> str:
     """
     Resolve conta financeira por forma de pagamento.
-    
-    Ordem de prioridade:
-    1. Mapeamento específico (company_payment_accounts)
-    2. Conta padrão da company (ca_financial_account_id)
-    3. Erro se nenhuma configurada
+    Prioridade: mapeamento específico → conta padrão → erro
     """
-    # Normaliza para chave (ex: PIX, CARTAO_CREDITO)
     tipo = _normalize_payment_method(payment_method)
     key_map = {
         "PIX_PAGAMENTO_INSTANTANEO": "PIX",
@@ -33,7 +29,6 @@ def _get_financial_account_id(db: Session, company: Company, payment_method: str
     }
     key = key_map.get(tipo, "OUTRO")
 
-    # 1) Busca mapeamento específico
     mapping = (
         db.query(CompanyPaymentAccount)
         .filter(
@@ -45,7 +40,6 @@ def _get_financial_account_id(db: Session, company: Company, payment_method: str
     if mapping:
         return mapping.ca_financial_account_id
 
-    # 2) Fallback para conta padrão
     if company.ca_financial_account_id:
         return company.ca_financial_account_id
 
@@ -53,6 +47,29 @@ def _get_financial_account_id(db: Session, company: Company, payment_method: str
         f"Nenhuma conta financeira configurada para '{key}'. "
         f"Configure em POST /v1/companies/{company.id}/payment-accounts"
     )
+
+
+def _resolve_product_uuids(
+    db: Session,
+    client: ContaAzulClient,
+    company_id: int,
+    items: list,
+) -> dict:
+    """
+    Para cada item, resolve o UUID do produto/serviço no CA.
+    Retorna dict {product_service_name → ca_product_uuid}.
+    """
+    uuid_map = {}
+    for item in items:
+        name = (item.product_service or "").strip()
+        if name and name not in uuid_map:
+            try:
+                uuid_map[name] = get_or_create_product_uuid_cached(
+                    db=db, client=client, company_id=company_id, product_name=name
+                )
+            except Exception as e:
+                print(f"[ROUTES_SALES] Erro ao resolver produto '{name}': {e}")
+    return uuid_map
 
 
 @router.get("/sales")
@@ -103,21 +120,26 @@ def send_to_ca(sale_id: int):
         client = ContaAzulClient(company_id=company.id)
 
         customer_uuid = get_or_create_customer_uuid_cached(
-            db=db, client=client, company_id=company.id, customer_name=sale.customer_name)
+            db=db, client=client, company_id=company.id, customer_name=sale.customer_name
+        )
+
+        # Resolve UUIDs dos produtos
+        product_uuid_map = _resolve_product_uuids(db, client, company.id, items)
 
         numero = client.get_next_sale_number()
-
-        # Resolve conta financeira por forma de pagamento
         financial_account_id = _get_financial_account_id(db, company, sale.payment_method)
 
-        payload = build_ca_sale_payload(
-            id_cliente=customer_uuid, numero=numero, sale=sale,
-            items=items, id_conta_financeira=financial_account_id)
+        # Injeta status configurável na venda antes de montar payload
+        sale._ca_sale_status = getattr(company, "ca_sale_status", None) or "EM_ANDAMENTO"
 
-        if company.default_item_id:
-            for it in payload.get("itens", []):
-                if not it.get("id"):
-                    it["id"] = company.default_item_id
+        payload = build_ca_sale_payload(
+            id_cliente=customer_uuid,
+            numero=numero,
+            sale=sale,
+            items=items,
+            id_conta_financeira=financial_account_id,
+            product_uuid_map=product_uuid_map,
+        )
 
         resp = client.create_sale(payload)
 
@@ -152,12 +174,19 @@ def send_batch_to_ca(batch_id: int):
     """Envia todas as vendas PRONTAS do batch para o Conta Azul."""
     db: Session = SessionLocal()
     try:
-        sales = (db.query(Sale).filter(Sale.batch_id == batch_id)
-                 .filter(Sale.status.in_(["PRONTA", "PRONTA_PARA_ENVIO"])).all())
+        sales = (
+            db.query(Sale)
+            .filter(Sale.batch_id == batch_id)
+            .filter(Sale.status.in_(["PRONTA", "PRONTA_PARA_ENVIO"]))
+            .all()
+        )
 
         if not sales:
-            return {"batch_id": batch_id, "total_sales": 0, "sent": 0, "errors": 0,
-                    "skipped": 0, "message": "Nenhuma venda PRONTA encontrada", "results": []}
+            return {
+                "batch_id": batch_id, "total_sales": 0, "sent": 0,
+                "errors": 0, "skipped": 0,
+                "message": "Nenhuma venda PRONTA encontrada", "results": [],
+            }
 
         company_ids = list(set([s.company_id for s in sales]))
         if len(company_ids) > 1:
@@ -169,34 +198,46 @@ def send_batch_to_ca(batch_id: int):
             raise HTTPException(status_code=404, detail="Company não encontrada")
 
         client = ContaAzulClient(company_id=company_id)
+        ca_sale_status = getattr(company, "ca_sale_status", None) or "EM_ANDAMENTO"
+
         sent = errors = 0
         results = []
 
         for sale in sales:
-            result = {"sale_id": sale.id, "customer_name": sale.customer_name,
-                      "total_amount": float(sale.total_amount), "status": None,
-                      "error": None, "ca_sale_id": None}
+            result = {
+                "sale_id": sale.id,
+                "customer_name": sale.customer_name,
+                "total_amount": float(sale.total_amount),
+                "status": None,
+                "error": None,
+                "ca_sale_id": None,
+            }
             try:
                 items = db.query(SaleItem).filter(SaleItem.sale_id == sale.id).all()
                 if not items:
                     raise RuntimeError("Venda sem itens")
 
                 customer_uuid = get_or_create_customer_uuid_cached(
-                    db=db, client=client, company_id=company_id, customer_name=sale.customer_name)
+                    db=db, client=client, company_id=company_id, customer_name=sale.customer_name
+                )
+
+                # Resolve UUIDs dos produtos para esta venda
+                product_uuid_map = _resolve_product_uuids(db, client, company_id, items)
 
                 numero = client.get_next_sale_number()
-
-                # Resolve conta por forma de pagamento
                 financial_account_id = _get_financial_account_id(db, company, sale.payment_method)
 
-                payload = build_ca_sale_payload(
-                    id_cliente=customer_uuid, numero=numero, sale=sale,
-                    items=items, id_conta_financeira=financial_account_id)
+                # Injeta status configurável
+                sale._ca_sale_status = ca_sale_status
 
-                if company.default_item_id:
-                    for it in payload.get("itens", []):
-                        if not it.get("id"):
-                            it["id"] = company.default_item_id
+                payload = build_ca_sale_payload(
+                    id_cliente=customer_uuid,
+                    numero=numero,
+                    sale=sale,
+                    items=items,
+                    id_conta_financeira=financial_account_id,
+                    product_uuid_map=product_uuid_map,
+                )
 
                 resp = client.create_sale(payload)
 
@@ -222,8 +263,11 @@ def send_batch_to_ca(batch_id: int):
 
             results.append(result)
 
-        return {"batch_id": batch_id, "company_id": company_id, "total_sales": len(sales),
-                "sent": sent, "errors": errors, "skipped": 0, "results": results}
+        return {
+            "batch_id": batch_id, "company_id": company_id,
+            "total_sales": len(sales), "sent": sent,
+            "errors": errors, "skipped": 0, "results": results,
+        }
 
     except HTTPException:
         raise
@@ -233,32 +277,9 @@ def send_batch_to_ca(batch_id: int):
         db.close()
 
 
-@router.post("/sales/{sale_id}/approve")
-def approve_sale(sale_id: int):
-    db: Session = SessionLocal()
-    try:
-        sale = db.query(Sale).filter(Sale.id == sale_id).first()
-        if not sale:
-            raise HTTPException(status_code=404, detail="Sale não encontrada")
-        if sale.status != "AGUARDANDO_APROVACAO":
-            raise HTTPException(status_code=400,
-                                detail=f"Sale não aguarda aprovação (status: {sale.status})")
-        sale.status = "PRONTA"
-        db.add(sale)
-        db.commit()
-        db.refresh(sale)
-        return {"ok": True, "sale_id": sale.id, "new_status": sale.status}
-    finally:
-        db.close()
-
-
 @router.delete("/batches/{batch_id}")
 def delete_batch(batch_id: int):
-    """
-    Exclui um lote e todas as vendas associadas.
-    Permitido apenas para lotes com status ERRO ou AGUARDANDO_APROVACAO.
-    Lotes com vendas ENVIADA_CA não podem ser excluídos.
-    """
+    """Exclui lote e vendas. Bloqueado se houver vendas já enviadas ao CA."""
     db: Session = SessionLocal()
     try:
         from app.db.models import UploadBatch
@@ -267,8 +288,6 @@ def delete_batch(batch_id: int):
             raise HTTPException(status_code=404, detail="Lote não encontrado")
 
         sales = db.query(Sale).filter(Sale.batch_id == batch_id).all()
-
-        # Bloqueia exclusão se qualquer venda já foi enviada ao CA
         enviadas = [s for s in sales if s.status == "ENVIADA_CA"]
         if enviadas:
             raise HTTPException(
@@ -289,12 +308,34 @@ def delete_batch(batch_id: int):
         db.close()
 
 
+@router.post("/sales/{sale_id}/approve")
+def approve_sale(sale_id: int):
+    db: Session = SessionLocal()
+    try:
+        sale = db.query(Sale).filter(Sale.id == sale_id).first()
+        if not sale:
+            raise HTTPException(status_code=404, detail="Sale não encontrada")
+        if sale.status != "AGUARDANDO_APROVACAO":
+            raise HTTPException(status_code=400, detail=f"Sale não aguarda aprovação (status: {sale.status})")
+        sale.status = "PRONTA"
+        db.add(sale)
+        db.commit()
+        db.refresh(sale)
+        return {"ok": True, "sale_id": sale.id, "new_status": sale.status}
+    finally:
+        db.close()
+
+
 @router.post("/batches/{batch_id}/approve")
 def approve_batch(batch_id: int):
     db: Session = SessionLocal()
     try:
-        sales = (db.query(Sale).filter(Sale.batch_id == batch_id)
-                 .filter(Sale.status == "AGUARDANDO_APROVACAO").all())
+        sales = (
+            db.query(Sale)
+            .filter(Sale.batch_id == batch_id)
+            .filter(Sale.status == "AGUARDANDO_APROVACAO")
+            .all()
+        )
         for sale in sales:
             sale.status = "PRONTA"
             db.add(sale)

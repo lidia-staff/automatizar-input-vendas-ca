@@ -346,3 +346,8 @@ class ContaAzulClient:
     def create_sale(self, payload: dict) -> dict:
         """Cria venda no Conta Azul."""
         return self._request("POST", "/v1/venda", json=payload, timeout=60)
+
+    def create_product(self, nome: str, tipo: str = "Prestado") -> dict:
+        """Cria produto/serviço no Conta Azul. tipo: Prestado | Tomado | Prestado e Tomado"""
+        payload = {"nome": nome, "tipo": tipo, "ativo": True}
+        return self._request("POST", "/v1/produtos", json=payload, timeout=30)
