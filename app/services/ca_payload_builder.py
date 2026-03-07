@@ -84,10 +84,21 @@ def build_ca_payload(sale, product_uuid_map: dict | None = None) -> Dict:
         },
     }
 
+    # Categoria financeira — só inclui se UUID resolvido
+    category_id = getattr(sale, "_ca_category_id", None)
+    if category_id:
+        payload["id_categoria"] = category_id
+
     # Desconto em R$ — só inclui se informado e maior que zero
     discount = getattr(sale, "discount_amount", None)
-    if discount is not None and float(discount) > 0:
-        payload["desconto"] = float(discount)
+    if discount is not None:
+        try:
+            import math
+            dval = float(discount)
+            if not math.isnan(dval) and dval > 0:
+                payload["desconto"] = dval
+        except Exception:
+            pass
 
     # Centro de custo — só inclui se informado
     cost_center = getattr(sale, "cost_center_id", None)

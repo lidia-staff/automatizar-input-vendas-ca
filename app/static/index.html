@@ -352,6 +352,26 @@
           <button class="btn btn-secondary btn-sm" onclick="addCostCenter()" style="margin-bottom:1px">+ Adicionar</button>
         </div>
       </div>
+
+      <!-- Categoria Financeira -->
+      <div class="card">
+        <div class="card-title">📂 Mapeamento Categoria Financeira</div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:14px">
+          Mapeia o nome da coluna CATEGORIA da planilha para o UUID da categoria no CA.
+        </p>
+        <div id="categories-list" style="margin-bottom:16px"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin:0;flex:1;min-width:150px">
+            <label>Nome (planilha)</label>
+            <input type="text" id="catNameInput" placeholder="Ex: Receitas de Serviços">
+          </div>
+          <div class="form-group" style="margin:0;flex:2;min-width:200px">
+            <label>UUID no CA (36 chars)</label>
+            <input type="text" id="catUuidInput" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="addCategory()" style="margin-bottom:1px">+ Adicionar</button>
+        </div>
+      </div>
       <!-- PIN de Acesso -->
       <div class="card">
         <div class="card-title" id="pinCardTitle">🔒 PIN de Acesso</div>
@@ -436,7 +456,7 @@ function showPage(page) {
   
   if (page === 'dashboard') loadDashboard();
   if (page === 'batches') loadBatches();
-  if (page === 'config') { loadCAAccounts(); loadPaymentMappings(); loadDefaultAccount(); loadGroupMode(); loadPinStatus(); loadCostCenters(); }
+  if (page === 'config') { loadCAAccounts(); loadPaymentMappings(); loadDefaultAccount(); loadGroupMode(); loadPinStatus(); loadCostCenters(); loadCategories(); }
 }
 
 // ─── COMPANY ──────────────────────────────────────────────────────
@@ -1037,6 +1057,63 @@ document.addEventListener('DOMContentLoaded', () => {
   if (sel) sel.addEventListener('change', () => updateGroupModeDesc(sel.value));
 });
 
+
+
+async function loadCategories() {
+  const el = document.getElementById('categories-list');
+  if (!el) return;
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}/categories`);
+    const data = await res.json();
+    if (!data.length) {
+      el.innerHTML = '<p style="color:var(--muted);font-size:13px">Nenhum mapeamento configurado.</p>';
+      return;
+    }
+    el.innerHTML = `<table style="width:100%;font-size:13px">
+      <tr><th>Nome (planilha)</th><th>UUID CA</th><th></th></tr>
+      ${data.map(r => `<tr>
+        <td><span class="badge badge-gray">${r.label || r.name_key}</span></td>
+        <td><code style="font-size:11px;color:var(--muted)">${r.ca_category_id.substring(0,18)}...</code></td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteCategory('${r.name_key}')">✕</button></td>
+      </tr>`).join('')}
+    </table>`;
+  } catch(e) {
+    el.innerHTML = `<p style="color:var(--error);font-size:13px">${e.message}</p>`;
+  }
+}
+
+async function addCategory() {
+  const name = document.getElementById('catNameInput').value.trim();
+  const uuid = document.getElementById('catUuidInput').value.trim();
+  if (!name || !uuid) return toast('Preencha nome e UUID', 'error');
+  if (uuid.length !== 36) return toast('UUID deve ter 36 caracteres', 'error');
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name_key: name, ca_category_id: uuid, label: name }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Erro');
+    document.getElementById('catNameInput').value = '';
+    document.getElementById('catUuidInput').value = '';
+    toast(`✅ Categoria "${name}" salva`, 'success');
+    loadCategories();
+  } catch(e) {
+    toast(`Erro: ${e.message}`, 'error');
+  }
+}
+
+async function deleteCategory(nameKey) {
+  if (!confirm(`Remover mapeamento "${nameKey}"?`)) return;
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}/categories/${encodeURIComponent(nameKey)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Erro ao remover');
+    toast(`Mapeamento "${nameKey}" removido`, 'success');
+    loadCategories();
+  } catch(e) {
+    toast(`Erro: ${e.message}`, 'error');
+  }
+}
 
 async function loadCostCenters() {
   const el = document.getElementById('cost-centers-list');

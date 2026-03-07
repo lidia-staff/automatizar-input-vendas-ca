@@ -26,6 +26,7 @@ class Company(Base):
     products = relationship("CompanyProduct", back_populates="company", cascade="all, delete-orphan")
     payment_accounts = relationship("CompanyPaymentAccount", back_populates="company", cascade="all, delete-orphan")
     cost_centers = relationship("CompanyCostCenter", back_populates="company", cascade="all, delete-orphan")
+    categories = relationship("CompanyCategory", back_populates="company", cascade="all, delete-orphan")
 
 
 class CompanyPaymentAccount(Base):
@@ -74,6 +75,21 @@ class CompanyCostCenter(Base):
     ca_cost_center_id = Column(String(80), nullable=False)  # UUID no CA
     created_at = Column(DateTime, default=datetime.utcnow)
     company = relationship("Company", back_populates="cost_centers")
+
+
+class CompanyCategory(Base):
+    """Mapeamento nome (planilha) → UUID da categoria financeira no CA."""
+    __tablename__ = "company_categories"
+    __table_args__ = (
+        UniqueConstraint("company_id", "name_key", name="uq_company_category_key"),
+    )
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    name_key = Column(String(250), nullable=False)      # nome normalizado
+    label = Column(String(200), nullable=True)           # nome original
+    ca_category_id = Column(String(80), nullable=False)  # UUID no CA
+    created_at = Column(DateTime, default=datetime.utcnow)
+    company = relationship("Company", back_populates="categories")
 
 class UploadBatch(Base):
     __tablename__ = "upload_batches"

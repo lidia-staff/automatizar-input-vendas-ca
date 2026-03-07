@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.db.models import Sale, SaleItem, Company, CompanyPaymentAccount, CompanyCostCenter
+from app.db.models import Sale, SaleItem, Company, CompanyPaymentAccount, CompanyCostCenter, CompanyCategory
 from app.services.conta_azul_client import ContaAzulClient
 from app.services.contaazul_people import get_or_create_customer_uuid_cached
 from app.services.contaazul_products import get_or_create_product_uuid_cached
@@ -10,6 +10,15 @@ from app.services.ca_sale_builder import build_ca_sale_payload
 from app.services.ca_payload_builder import _normalize_payment_method
 
 router = APIRouter(tags=["sales"])
+
+
+
+def _get_sale_category(db, sale_id: int) -> str | None:
+    """Busca a categoria do primeiro item da venda."""
+    item = db.query(SaleItem).filter(SaleItem.sale_id == sale_id).first()
+    if item and item.category:
+        return item.category
+    return None
 
 
 def _get_financial_account_id(db: Session, company: Company, payment_method: str) -> str:
@@ -95,6 +104,25 @@ def _resolve_cost_center_id(
     return None
 
 
+
+def _resolve_category_id(db, company_id: int, category_raw: str | None) -> str | None:
+    """
+    Resolve nome da categoria (planilha) → UUID do CA via tabela de mapeamento.
+    Retorna None se não informado ou mapeamento não encontrado.
+    """
+    if not category_raw or str(category_raw).strip() in ("", "nan", "None"):
+        return None
+    key = category_raw.strip().upper()
+    row = db.query(CompanyCategory).filter(
+        CompanyCategory.company_id == company_id,
+        CompanyCategory.name_key == key,
+    ).first()
+    if row:
+        return row.ca_category_id
+    print(f"[SALES] Categoria '{key}' sem mapeamento configurado — omitindo do payload")
+    return None
+
+
 @router.get("/sales")
 def list_sales(company_id: int | None = None, batch_id: int | None = None, status: str | None = None):
     db: Session = SessionLocal()
@@ -152,10 +180,23 @@ def send_to_ca(sale_id: int):
         numero = client.get_next_sale_number()
         financial_account_id = _get_financial_account_id(db, company, sale.payment_method)
 
-        # Resolve centro de custo: texto da planilha → UUID do CA
+        # Resolve centro de custo: texto → UUID
         raw_cc = getattr(sale, "cost_center_id", None)
-        resolved_cc = _resolve_cost_center_id(db, company.id, raw_cc)
-        sale.cost_center_id = resolved_cc  # substitui texto pelo UUID (ou None)
+        sale.cost_center_id = _resolve_cost_center_id(db, company.id, raw_cc)
+
+        # Resolve categoria financeira: texto → UUID
+        raw_cat = getattr(sale, "_category_raw", None) or _get_sale_category(db, sale.id)
+        sale._ca_category_id = _resolve_category_id(db, company.id, raw_cat)
+
+        # Corrige NaN do pandas no desconto
+        discount = getattr(sale, "discount_amount", None)
+        if discount is not None:
+            try:
+                import math
+                if math.isnan(float(discount)):
+                    sale.discount_amount = None
+            except Exception:
+                pass
 
         # Injeta status configurável na venda antes de montar payload
         sale._ca_sale_status = getattr(company, "ca_sale_status", None) or "EM_ANDAMENTO"
@@ -258,6 +299,20 @@ def send_batch_to_ca(batch_id: int):
                 # Resolve centro de custo: texto → UUID
                 raw_cc = getattr(sale, "cost_center_id", None)
                 sale.cost_center_id = _resolve_cost_center_id(db, company_id, raw_cc)
+
+                # Resolve categoria financeira: texto → UUID
+                raw_cat = _get_sale_category(db, sale.id)
+                sale._ca_category_id = _resolve_category_id(db, company_id, raw_cat)
+
+                # Corrige NaN do pandas no desconto
+                discount = getattr(sale, "discount_amount", None)
+                if discount is not None:
+                    try:
+                        import math
+                        if math.isnan(float(discount)):
+                            sale.discount_amount = None
+                    except Exception:
+                        pass
 
                 # Injeta status configurável
                 sale._ca_sale_status = ca_sale_status

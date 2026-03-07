@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.db.models import Company, CompanyPaymentAccount, CompanyCostCenter
+from app.db.models import Company, CompanyPaymentAccount, CompanyCostCenter, CompanyCategory
 from app.services.conta_azul_client import ContaAzulClient
 
 router = APIRouter(tags=["companies"])
@@ -365,6 +365,72 @@ def delete_cost_center(company_id: int, name_key: str):
         row = db.query(CompanyCostCenter).filter(
             CompanyCostCenter.company_id == company_id,
             CompanyCostCenter.name_key == key).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Mapeamento não encontrado")
+        db.delete(row)
+        db.commit()
+        return {"ok": True, "deleted": key}
+    finally:
+        db.close()
+
+
+# ── CATEGORIA FINANCEIRA ─────────────────────────────────────────────────────
+
+@router.get("/companies/{company_id}/categories")
+def list_categories(company_id: int):
+    db: Session = SessionLocal()
+    try:
+        rows = db.query(CompanyCategory).filter(
+            CompanyCategory.company_id == company_id).all()
+        return [{"name_key": r.name_key, "label": r.label,
+                 "ca_category_id": r.ca_category_id} for r in rows]
+    finally:
+        db.close()
+
+
+@router.post("/companies/{company_id}/categories")
+def set_category(
+    company_id: int,
+    name_key: str = Body(..., embed=True),
+    ca_category_id: str = Body(..., embed=True),
+    label: Optional[str] = Body(None, embed=True),
+):
+    key = name_key.strip().upper()
+    if not key:
+        raise HTTPException(status_code=400, detail="name_key não pode ser vazio")
+    if len(ca_category_id.strip()) != 36:
+        raise HTTPException(status_code=400, detail="ca_category_id deve ser UUID com 36 caracteres")
+
+    db: Session = SessionLocal()
+    try:
+        existing = db.query(CompanyCategory).filter(
+            CompanyCategory.company_id == company_id,
+            CompanyCategory.name_key == key).first()
+        if existing:
+            existing.ca_category_id = ca_category_id.strip()
+            existing.label = label or key
+            db.add(existing)
+        else:
+            db.add(CompanyCategory(
+                company_id=company_id,
+                name_key=key,
+                label=label or key,
+                ca_category_id=ca_category_id.strip(),
+            ))
+        db.commit()
+        return {"ok": True, "name_key": key, "ca_category_id": ca_category_id.strip()}
+    finally:
+        db.close()
+
+
+@router.delete("/companies/{company_id}/categories/{name_key}")
+def delete_category(company_id: int, name_key: str):
+    key = name_key.strip().upper()
+    db: Session = SessionLocal()
+    try:
+        row = db.query(CompanyCategory).filter(
+            CompanyCategory.company_id == company_id,
+            CompanyCategory.name_key == key).first()
         if not row:
             raise HTTPException(status_code=404, detail="Mapeamento não encontrado")
         db.delete(row)

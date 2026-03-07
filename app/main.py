@@ -104,6 +104,15 @@ def run_schema_migrations():
             CONSTRAINT uq_company_product_key UNIQUE (company_id, product_key)
         );""",
         "CREATE INDEX IF NOT EXISTS ix_company_products_company_key ON company_products(company_id, product_key);",
+        """CREATE TABLE IF NOT EXISTS company_categories (
+            id SERIAL PRIMARY KEY,
+            company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            name_key VARCHAR(250) NOT NULL,
+            label VARCHAR(200),
+            ca_category_id VARCHAR(80) NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT uq_company_category_key UNIQUE (company_id, name_key)
+        );""",
         """CREATE TABLE IF NOT EXISTS company_cost_centers (
             id SERIAL PRIMARY KEY,
             company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
