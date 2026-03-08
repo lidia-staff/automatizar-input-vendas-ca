@@ -77,7 +77,7 @@ def build_ca_payload(sale, product_uuid_map: dict | None = None) -> Dict:
             "tipo_pagamento": tipo_pagamento,
             "opcao_condicao_pagamento": "À vista" if n_parcelas == 1 else f"{n_parcelas}x",
             "parcelas": _build_parcelas(
-                total=float(sale.total_amount),
+                total=round(float(sale.total_amount) - (float(str(sale.discount_amount)) if sale.discount_amount else 0), 2),
                 due_date=sale.due_date,
                 parcelas=n_parcelas,
             ),
