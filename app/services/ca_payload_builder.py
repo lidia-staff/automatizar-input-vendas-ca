@@ -90,15 +90,19 @@ def build_ca_payload(sale, product_uuid_map: dict | None = None) -> Dict:
         payload["id_categoria"] = category_id
 
     # Desconto em R$ — só inclui se informado e maior que zero
+    import math
+    from decimal import Decimal as _Decimal
     discount = getattr(sale, "discount_amount", None)
+    print(f"[PAYLOAD] discount_amount raw: {discount!r} type={type(discount).__name__}")
     if discount is not None:
         try:
-            import math
-            dval = float(discount)
+            dval = float(str(discount))  # str() garante conversão correta de Decimal ORM
+            print(f"[PAYLOAD] discount float: {dval}")
             if not math.isnan(dval) and dval > 0:
                 payload["desconto"] = dval
-        except Exception:
-            pass
+                print(f"[PAYLOAD] desconto incluído no payload: {dval}")
+        except Exception as e:
+            print(f"[PAYLOAD] erro ao converter desconto: {e}")
 
     # Centro de custo — só inclui se informado
     cost_center = getattr(sale, "cost_center_id", None)
