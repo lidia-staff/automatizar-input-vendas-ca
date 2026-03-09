@@ -17,7 +17,22 @@ def get_or_create_product_uuid(client: ContaAzulClient, product_name: str) -> st
     if not name:
         raise RuntimeError("product_name vazio")
 
-    # 1) Busca no CA por nome exato
+    name_upper = name.upper()
+
+    # 1) Busca em serviços primeiro
+    try:
+        resp = client.list_services(busca=name)
+        itens = resp.get("itens", []) if isinstance(resp, dict) else []
+        for p in itens:
+            if (p.get("descricao") or "").upper() == name_upper:
+                ca_id = p.get("id")
+                if ca_id:
+                    print(f"[PRODUCTS] Serviço '{name}' encontrado no CA: {ca_id}")
+                    return str(ca_id)
+    except Exception as e:
+        print(f"[PRODUCTS] Erro ao buscar serviço '{name}': {e}")
+
+    # 2) Fallback: busca em produtos
     try:
         resp = client.list_products(busca=name)
         if isinstance(resp, dict):
@@ -26,10 +41,8 @@ def get_or_create_product_uuid(client: ContaAzulClient, product_name: str) -> st
             produtos = resp
         else:
             produtos = []
-
-        name_upper = name.upper()
         for p in produtos:
-            if p.get("nome", "").upper() == name_upper:
+            if (p.get("nome") or "").upper() == name_upper:
                 ca_id = p.get("id")
                 if ca_id:
                     print(f"[PRODUCTS] Produto '{name}' encontrado no CA: {ca_id}")
@@ -37,16 +50,16 @@ def get_or_create_product_uuid(client: ContaAzulClient, product_name: str) -> st
     except Exception as e:
         print(f"[PRODUCTS] Erro ao buscar produto '{name}': {e}")
 
-    # 2) Cria novo produto no CA
+    # 3) Cria como serviço
     try:
-        resp = client.create_product(nome=name)
+        resp = client.create_service(nome=name)
         ca_id = resp.get("id") if isinstance(resp, dict) else None
         if not ca_id:
-            raise RuntimeError(f"CA não retornou 'id' ao criar produto: {resp}")
-        print(f"[PRODUCTS] Produto '{name}' criado no CA: {ca_id}")
+            raise RuntimeError(f"CA não retornou 'id' ao criar serviço: {resp}")
+        print(f"[PRODUCTS] Serviço '{name}' criado no CA: {ca_id}")
         return str(ca_id)
     except Exception as e:
-        raise RuntimeError(f"Erro ao criar produto '{name}' no CA: {e}")
+        raise RuntimeError(f"Erro ao criar serviço '{name}' no CA: {e}")
 
 
 def get_or_create_product_uuid_cached(
