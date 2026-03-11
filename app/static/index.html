@@ -309,6 +309,7 @@
           <select id="groupModeSelect">
             <option value="grouped">Agrupar por cliente + data + pagamento (padrão)</option>
             <option value="individual">Uma venda por linha (sem agrupamento)</option>
+            <option value="by_sale_number">Agrupar por número da venda</option>
           </select>
           <p style="color:var(--muted);font-size:11px;margin-top:6px" id="groupModeDesc"></p>
         </div>
@@ -1046,6 +1047,9 @@ function updateGroupModeDesc(mode) {
   if (mode === 'individual') {
     desc.textContent = 'Cada linha da planilha será importada como uma venda separada.';
     desc.style.color = 'var(--warn)';
+  } else if (mode === 'by_sale_number') {
+    desc.textContent = 'Linhas com o mesmo Nº da Venda serão agrupadas em uma única venda. Linhas sem número serão importadas individualmente.';
+    desc.style.color = 'var(--muted)';
   } else {
     desc.textContent = 'Linhas com mesmo cliente, data e pagamento serão agrupadas em uma única venda.';
     desc.style.color = 'var(--muted)';
@@ -1196,7 +1200,8 @@ async function saveGroupMode() {
       body: JSON.stringify({ group_mode: mode })
     });
     if (!res.ok) throw new Error('Erro ao salvar');
-    const label = mode === 'individual' ? 'Uma venda por linha' : 'Agrupamento padrão';
+    const labels = { individual: 'Uma venda por linha', by_sale_number: 'Agrupar por número da venda', grouped: 'Agrupamento padrão' };
+    const label = labels[mode] || 'Agrupamento padrão';
     toast(`✅ Modo salvo: ${label}`, 'success');
   } catch(e) {
     toast('Erro ao salvar modo de agrupamento', 'error');

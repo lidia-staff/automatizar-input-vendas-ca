@@ -50,6 +50,19 @@ def _build_individual_key(row: dict, index: int) -> str:
     return f"individual|{index}|{d}|{cliente}|{produto}|{valor}"
 
 
+def _build_sale_number_key(row: dict, index: int) -> str:
+    """Agrupa pelo número da venda se informado; senão trata como linha individual."""
+    numero = str(row.get("NUMERO_VENDA") or "").strip()
+    if numero:
+        return f"by_number|{numero}"
+    # fallback: linha individual
+    d = row["DATA ATENDIMENTO"].isoformat()
+    cliente = str(row["CLIENTE / PACIENTE"]).strip()
+    produto = str(row.get("PRODUTOS/SERVIÇOS") or "").strip()
+    valor = str(row.get("VALOR UNITARIO") or "").strip()
+    return f"individual|{index}|{d}|{cliente}|{produto}|{valor}"
+
+
 def _hash_unique(group_key: str, items_signature: str) -> str:
     raw = f"{group_key}::{items_signature}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
@@ -72,7 +85,8 @@ def create_sales_from_records(
 
     group_mode da empresa:
       - "grouped"    → agrupa por cliente + data + pagamento + conta (padrão)
-      - "individual" → cada linha = uma venda separada
+      - "individual"      → cada linha = uma venda separada
+      - "by_sale_number" → agrupa pelo NUMERO_VENDA; sem número = linha individual
 
     Retorna: (created, ready, awaiting, with_error, items_with_error)
     """
@@ -93,6 +107,8 @@ def create_sales_from_records(
 
         if mode == "individual":
             gk = _build_individual_key(row, idx)
+        elif mode == "by_sale_number":
+            gk = _build_sale_number_key(row, idx)
         else:
             gk = _build_group_key(row)
 
