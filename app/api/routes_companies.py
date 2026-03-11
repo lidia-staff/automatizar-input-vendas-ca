@@ -125,7 +125,9 @@ def get_company(company_id: int):
             "ca_financial_account_id": c.ca_financial_account_id,
             "default_item_id": getattr(c, "default_item_id", None),
             "has_pin": bool(getattr(c, "access_pin", None)),
-            "review_mode": c.review_mode
+            "review_mode": c.review_mode,
+            "group_mode": getattr(c, "group_mode", "grouped") or "grouped",
+            "ca_sale_status": getattr(c, "ca_sale_status", "EM_ANDAMENTO") or "EM_ANDAMENTO",
         }
     finally:
         db.close()
@@ -162,7 +164,7 @@ def update_company(
             # Salva o hash do PIN (nunca o PIN em texto claro)
             c.access_pin = _hash_pin(access_pin) if access_pin.strip() else None
         if group_mode is not None:
-            valid_modes = ["grouped", "individual"]
+            valid_modes = ["grouped", "individual", "by_sale_number"]
             if group_mode not in valid_modes:
                 raise HTTPException(status_code=400, detail=f"group_mode inválido. Válidos: {valid_modes}")
             c.group_mode = group_mode
