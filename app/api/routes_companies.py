@@ -128,6 +128,7 @@ def get_company(company_id: int):
             "review_mode": c.review_mode,
             "group_mode": getattr(c, "group_mode", "grouped") or "grouped",
             "ca_sale_status": getattr(c, "ca_sale_status", "EM_ANDAMENTO") or "EM_ANDAMENTO",
+            "item_type": getattr(c, "item_type", "servico") or "servico",
         }
     finally:
         db.close()
@@ -144,6 +145,7 @@ def update_company(
     access_pin: Optional[str] = Body(None, embed=True),
     group_mode: Optional[str] = Body(None, embed=True),
     ca_sale_status: Optional[str] = Body(None, embed=True),
+    item_type: Optional[str] = Body(None, embed=True),
 ):
     db: Session = SessionLocal()
     try:
@@ -173,10 +175,15 @@ def update_company(
             if ca_sale_status not in valid_statuses:
                 raise HTTPException(status_code=400, detail=f"ca_sale_status inválido. Válidos: {valid_statuses}")
             c.ca_sale_status = ca_sale_status
+        if item_type is not None:
+            valid_types = ["servico", "produto"]
+            if item_type not in valid_types:
+                raise HTTPException(status_code=400, detail=f"item_type inválido. Válidos: {valid_types}")
+            c.item_type = item_type
         db.add(c)
         db.commit()
         db.refresh(c)
-        return {"id": c.id, "name": c.name, "slug": c.slug, "has_pin": bool(c.access_pin), "group_mode": c.group_mode, "ca_sale_status": c.ca_sale_status}
+        return {"id": c.id, "name": c.name, "slug": c.slug, "has_pin": bool(c.access_pin), "group_mode": c.group_mode, "ca_sale_status": c.ca_sale_status, "item_type": c.item_type}
     finally:
         db.close()
 

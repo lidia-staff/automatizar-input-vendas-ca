@@ -316,6 +316,22 @@
         <button class="btn btn-primary btn-sm" onclick="saveGroupMode()">Salvar Modo</button>
       </div>
 
+      <!-- Tipo de Item -->
+      <div class="card">
+        <div class="card-title">🏷️ Tipo de Item no Conta Azul</div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:14px">
+          Define se os itens das vendas serão tratados como Serviço ou Produto no Conta Azul.
+        </p>
+        <div class="form-group">
+          <label>Tipo</label>
+          <select id="itemTypeSelect">
+            <option value="servico">Serviço (padrão)</option>
+            <option value="produto">Produto</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveItemType()">Salvar Tipo</button>
+      </div>
+
 
       <!-- Status da Venda no CA -->
       <div class="card">
@@ -1035,10 +1051,13 @@ async function loadGroupMode() {
     const data = await res.json();
     const mode = data.group_mode || 'grouped';
     const saleStatus = data.ca_sale_status || 'EM_ANDAMENTO';
+    const itemType = data.item_type || 'servico';
     const statusSel = document.getElementById('caSaleStatusSelect');
     if (statusSel) statusSel.value = saleStatus;
     document.getElementById('groupModeSelect').value = mode;
     updateGroupModeDesc(mode);
+    const itemTypeSel = document.getElementById('itemTypeSelect');
+    if (itemTypeSel) itemTypeSel.value = itemType;
   } catch(e) {}
 }
 
@@ -1205,6 +1224,22 @@ async function saveGroupMode() {
     toast(`✅ Modo salvo: ${label}`, 'success');
   } catch(e) {
     toast('Erro ao salvar modo de agrupamento', 'error');
+  }
+}
+
+async function saveItemType() {
+  const item_type = document.getElementById('itemTypeSelect').value;
+  try {
+    const res = await fetch(`${API}/v1/companies/${currentCompanyId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_type })
+    });
+    if (!res.ok) throw new Error('Erro ao salvar');
+    const label = item_type === 'produto' ? 'Produto' : 'Serviço';
+    toast(`✅ Tipo de item salvo: ${label}`, 'success');
+  } catch(e) {
+    toast('Erro ao salvar tipo de item', 'error');
   }
 }
 

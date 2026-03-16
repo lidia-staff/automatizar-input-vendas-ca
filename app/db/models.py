@@ -20,6 +20,8 @@ class Company(Base):
     group_mode = Column(String(20), nullable=True, default="grouped")
     ca_sale_status = Column(String(30), nullable=True, default="EM_ANDAMENTO")
     # ca_sale_status: EM_ANDAMENTO | APROVADO | CONCLUIDO
+    item_type = Column(String(20), nullable=True, default="servico")
+    # item_type: servico | produto
     batches = relationship("UploadBatch", back_populates="company", cascade="all, delete-orphan")
     sales = relationship("Sale", back_populates="company", cascade="all, delete-orphan")
     customers = relationship("CompanyCustomer", back_populates="company", cascade="all, delete-orphan")

@@ -76,6 +76,7 @@ def run_schema_migrations():
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS access_pin VARCHAR(64);",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS group_mode VARCHAR(20) DEFAULT 'grouped';",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS ca_sale_status VARCHAR(30) DEFAULT 'EM_ANDAMENTO';",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS item_type VARCHAR(20) DEFAULT 'servico';",
         # Sales
         "ALTER TABLE sales ADD COLUMN IF NOT EXISTS sale_number VARCHAR(50);",
         "ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2);",

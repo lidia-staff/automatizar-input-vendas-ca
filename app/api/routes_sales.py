@@ -63,6 +63,7 @@ def _resolve_product_uuids(
     client: ContaAzulClient,
     company_id: int,
     items: list,
+    item_type: str = "servico",
 ) -> dict:
     """
     Para cada item, resolve o UUID do produto/serviço no CA.
@@ -74,7 +75,7 @@ def _resolve_product_uuids(
         if name and name not in uuid_map:
             try:
                 uuid_map[name] = get_or_create_product_uuid_cached(
-                    db=db, client=client, company_id=company_id, product_name=name
+                    db=db, client=client, company_id=company_id, product_name=name, item_type=item_type
                 )
             except Exception as e:
                 print(f"[ROUTES_SALES] Erro ao resolver produto '{name}': {e}")
@@ -175,7 +176,8 @@ def send_to_ca(sale_id: int):
         )
 
         # Resolve UUIDs dos produtos
-        product_uuid_map = _resolve_product_uuids(db, client, company.id, items)
+        item_type = getattr(company, "item_type", None) or "servico"
+        product_uuid_map = _resolve_product_uuids(db, client, company.id, items, item_type=item_type)
 
         numero = client.get_next_sale_number()
         financial_account_id = _get_financial_account_id(db, company, sale.payment_method)
@@ -268,6 +270,7 @@ def send_batch_to_ca(batch_id: int):
 
         client = ContaAzulClient(company_id=company_id)
         ca_sale_status = getattr(company, "ca_sale_status", None) or "EM_ANDAMENTO"
+        item_type = getattr(company, "item_type", None) or "servico"
 
         sent = errors = 0
         results = []
@@ -291,7 +294,7 @@ def send_batch_to_ca(batch_id: int):
                 )
 
                 # Resolve UUIDs dos produtos para esta venda
-                product_uuid_map = _resolve_product_uuids(db, client, company_id, items)
+                product_uuid_map = _resolve_product_uuids(db, client, company_id, items, item_type=item_type)
 
                 numero = client.get_next_sale_number()
                 financial_account_id = _get_financial_account_id(db, company, sale.payment_method)
