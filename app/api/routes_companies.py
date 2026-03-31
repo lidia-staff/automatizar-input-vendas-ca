@@ -129,6 +129,7 @@ def get_company(company_id: int):
             "group_mode": getattr(c, "group_mode", "grouped") or "grouped",
             "ca_sale_status": getattr(c, "ca_sale_status", "EM_ANDAMENTO") or "EM_ANDAMENTO",
             "item_type": getattr(c, "item_type", "servico") or "servico",
+            "asaas_enabled": bool(getattr(c, "asaas_enabled", False)),
         }
     finally:
         db.close()
@@ -146,6 +147,7 @@ def update_company(
     group_mode: Optional[str] = Body(None, embed=True),
     ca_sale_status: Optional[str] = Body(None, embed=True),
     item_type: Optional[str] = Body(None, embed=True),
+    asaas_enabled: Optional[bool] = Body(None, embed=True),
 ):
     db: Session = SessionLocal()
     try:
@@ -180,6 +182,8 @@ def update_company(
             if item_type not in valid_types:
                 raise HTTPException(status_code=400, detail=f"item_type inválido. Válidos: {valid_types}")
             c.item_type = item_type
+        if asaas_enabled is not None:
+            c.asaas_enabled = asaas_enabled
         db.add(c)
         db.commit()
         db.refresh(c)
